@@ -1,0 +1,17 @@
+# Alternativa grátis ao GitHub Actions: o Codemagic lê este arquivo do repositório.
+workflows:
+  android-debug:
+    name: DJ Fusion Pro (debug)
+    instance_type: linux_x2
+    max_build_duration: 40
+    environment:
+      java: 17
+    scripts:
+      - name: Testes do motor de áudio
+        script: bash tests/native/run_tests.sh
+      - name: Testes da ponte JNI
+        script: bash tests/jni/run_jni.sh
+      - name: Compilar APK de depuração
+        script: bash gradlew assembleDebug --stacktrace
+    artifacts:
+      - app/build/outputs/apk/debug/*.apk
