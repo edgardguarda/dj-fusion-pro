@@ -1,17 +1,18 @@
 # Alternativa grátis ao GitHub Actions: o Codemagic lê este arquivo do repositório.
+# O plano grátis só oferece máquina macOS (M2), então aqui só compila o APK.
+# Os testes do motor rodam no Linux (GitHub Actions ou na minha máquina), não aqui.
 workflows:
   android-debug:
     name: DJ Fusion Pro (debug)
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
     max_build_duration: 40
     environment:
       java: 17
     scripts:
-      - name: Testes do motor de áudio
-        script: bash tests/native/run_tests.sh
-      - name: Testes da ponte JNI
-        script: bash tests/jni/run_jni.sh
+      - name: Aceitar licenças do Android SDK
+        script: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - name: Compilar APK de depuração
         script: bash gradlew assembleDebug --stacktrace
     artifacts:
       - app/build/outputs/apk/debug/*.apk
+ 
