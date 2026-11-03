@@ -1,0 +1,46 @@
+feature,area,priority,original,clone,notes
+Dois decks independentes com play/pause,mixer ao vivo,must,yes,partial,"motor testado no Linux (ASan, UBSan, TSan); interface e áudio real ainda não rodaram no aparelho"
+Importar músicas locais (MP3 WAV FLAC AAC),biblioteca,must,yes,partial,seletor de arquivos e decodificador MediaCodec escritos; conversão e limite de tamanho testados no Linux; o decodificador em si nunca rodou
+Crossfader entre os dois decks,mixer ao vivo,must,yes,partial,"motor testado no Linux (ASan, UBSan, TSan); interface e áudio real ainda não rodaram no aparelho; curva de potência constante conferida"
+Volume individual por deck e master,mixer ao vivo,must,yes,partial,"motor testado no Linux (ASan, UBSan, TSan); interface e áudio real ainda não rodaram no aparelho"
+Biblioteca com busca e ordenação,biblioteca,must,yes,partial,"escrito, sem teste no aparelho (SQLite do Android)"
+Waveform interativa com toque para posicionar,mixer ao vivo,must,yes,partial,"picos por faixa de frequência testados no Linux; desenho e toque na visão geral escritos, sem teste no aparelho"
+Cue (ponto de cue por deck),mixer ao vivo,must,yes,partial,"motor testado no Linux (ASan, UBSan, TSan); interface e áudio real ainda não rodaram no aparelho"
+Equalizador de 3 bandas por deck,mixer ao vivo,must,yes,no,
+Análise de BPM com grade de batidas,análise,must,yes,no,Implementação própria
+Ajuste de pitch/tempo com time-stretch,mixer ao vivo,must,yes,no,Biblioteca de licença permissiva
+Sync de BPM entre decks,mixer ao vivo,must,yes,no,
+Reconhecer controladora Numark DJ2GO2 Touch por USB,hardware,must,no,no,Meta do usuário. djay Android não lista este modelo nas fontes lidas. Precisa de teste no aparelho real
+Mapeamento MIDI com aprender (MIDI Learn),hardware,must,yes,no,Android só documenta MIDI Learn no djay para iOS/desktop. Nossa versão própria
+Perfis de mapeamento para outros modelos Numark,hardware,should,yes,no,djay lista Party Mix III e MixTrack Go no Android
+Jog wheel como scratch e pitch bend,hardware,should,yes,no,
+Hot cues (vários por faixa),mixer ao vivo,should,yes,no,
+Loops automáticos e manuais,mixer ao vivo,should,yes,no,
+Sampler com pads,mixer ao vivo,should,yes,no,
+Efeitos de DJ (filtro eco reverb flanger),mixer ao vivo,should,yes,no,Efeitos próprios
+Scratch por toque na waveform,mixer ao vivo,should,yes,no,
+Pré-escuta (cue) em fones,mixer ao vivo,should,yes,no,Android só garante USB estéreo. Cue exige saída separada ou split mono. Testar
+Detecção de tonalidade (Camelot),análise,should,yes,no,
+Salvar cues BPM e tonalidade por faixa,biblioteca,should,yes,no,
+Playlists e sets,biblioteca,should,yes,no,
+Pontos de entrada e saída automáticos,análise,should,yes,no,djay Automix AI detecta intro e outro
+Automix de playlist,inteligente,should,yes,no,
+Timeline multifaixa,editor,should,yes,no,DJ.Studio
+Arrastar cortar e organizar faixas na timeline,editor,should,yes,no,DJ.Studio
+Transições manuais e automáticas,editor,should,yes,no,DJ.Studio
+Automação de volume filtro e efeitos,editor,should,yes,no,DJ.Studio
+Salvar projetos editáveis,editor,should,yes,no,
+Exportar mix finalizado (WAV),editor,should,yes,no,DJ.Studio exporta WAV e MP3. MP3 depende de encoder com licença adequada
+Sugestões de mixagem harmônica,inteligente,could,yes,no,DJ.Studio usa Camelot
+Recomendação de ordem das faixas,inteligente,could,yes,no,DJ.Studio fluxo de energia
+Looper gravando loops durante a mix,mixer ao vivo,could,yes,no,djay Looper até 8 loops
+Quatro decks,mixer ao vivo,could,yes,no,
+Separação de vocal bateria baixo (stems),inteligente,could,yes,no,Fase avançada. Viável só em processamento offline. Checar licença do modelo
+Exportar mix em outros formatos (MP3 FLAC),editor,could,yes,no,
+Tema visual metálico próprio (aço escovado),interface,must,no,partial,tema e componentes escritos a partir dos tokens; falta ver no aparelho
+Interface em português brasileiro,interface,must,no,partial,todos os textos escritos em português; falta ver no aparelho
+Modos DJ Live Studio Timeline e Biblioteca,interface,must,no,partial,DJ Live e Biblioteca escritos; Timeline aparece desabilitada com 'em breve'
+Streaming Spotify Apple Music TIDAL SoundCloud Beatport,biblioteca,could,yes,skip,Exige APIs oficiais e licenças. Fora do escopo
+Catálogo de músicas e conteúdo do app original,conteúdo,could,yes,skip,Conteúdo licenciado pertence a terceiros
+Plugins VST/AU e integração rekordbox Serato Traktor,editor,could,yes,skip,Desktop. Não se aplica ao Android
+Marketplace de pacotes de samples dos apps originais,conteúdo,could,yes,skip,Conteúdo e rede dos apps originais
