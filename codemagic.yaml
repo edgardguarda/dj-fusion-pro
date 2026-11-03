@@ -1,6 +1,5 @@
 # Alternativa grátis ao GitHub Actions: o Codemagic lê este arquivo do repositório.
 # O plano grátis só oferece máquina macOS (M2), então aqui só compila o APK.
-# Os testes do motor rodam no Linux (GitHub Actions ou na minha máquina), não aqui.
 workflows:
   android-debug:
     name: DJ Fusion Pro (debug)
@@ -12,7 +11,13 @@ workflows:
       - name: Aceitar licenças do Android SDK
         script: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - name: Compilar APK de depuração
-        script: bash gradlew assembleDebug --stacktrace
+        script: |
+          if ! bash gradlew assembleDebug --console=plain > build.log 2>&1; then
+            echo "=============== RESUMO DOS ERROS ==============="
+            grep -nE "^e: |^w: .*error|error:|What went wrong|Execution failed|Could not|not found|FAILED" -A4 build.log | head -120
+            echo "=============== FIM DO RESUMO ==============="
+            exit 1
+          fi
     artifacts:
       - app/build/outputs/apk/debug/*.apk
  
