@@ -1,5 +1,7 @@
-# Alternativa grátis ao GitHub Actions: o Codemagic lê este arquivo do repositório.
-# O plano grátis só oferece máquina macOS (M2), então aqui só compila o APK.
+# O Codemagic lê este arquivo do repositório.
+# Funciona de dois jeitos, sozinho:
+#  1) o repositório tem o projeto inteiro (pastas app, gradle...): compila direto;
+#  2) o repositório tem só este arquivo e o projeto.zip: abre o zip e compila.
 workflows:
   android-debug:
     name: DJ Fusion Pro (debug)
@@ -12,12 +14,24 @@ workflows:
         script: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - name: Compilar APK de depuração
         script: |
+          set -u
+          RAIZ="$(pwd)"
+          if [ -f projeto.zip ]; then
+            rm -rf fonte && mkdir fonte && unzip -q projeto.zip -d fonte
+            cd fonte
+            echo "Projeto aberto do projeto.zip"
+          fi
+          if [ ! -f gradlew ]; then
+            echo "ERRO: não achei o gradlew. Conteúdo da pasta:"; ls -la; exit 1
+          fi
           if ! bash gradlew assembleDebug --console=plain > build.log 2>&1; then
             echo "=============== RESUMO DOS ERROS ==============="
             grep -nE "^e: |^w: .*error|error:|What went wrong|Execution failed|Could not|not found|FAILED" -A4 build.log | head -120
             echo "=============== FIM DO RESUMO ==============="
             exit 1
           fi
+          cd "$RAIZ"
+          mkdir -p apk
+          cp "$(find . -path '*outputs/apk/debug/*.apk' | head -1)" apk/DJFusionPro-debug.apk
     artifacts:
-      - app/build/outputs/apk/debug/*.apk
- 
+      - apk/*.apk
