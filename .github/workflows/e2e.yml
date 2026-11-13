@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     paths: ['projeto.zip']
+permissions:
+  contents: write
 jobs:
   e2e:
     runs-on: ubuntu-latest
@@ -40,3 +42,14 @@ jobs:
           path: |
             e2e/
             fonte/app/build/outputs/apk/debug/*.apk
+      - name: Publicar resultado (fotos, relatório e APK)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p pub
+          (cd e2e && zip -qr ../pub/e2e-resultado.zip .) || true
+          cp fonte/app/build/outputs/apk/debug/*.apk pub/EdgardGuardaDJStudio-debug.apk || true
+          cp e2e/relatorio.txt pub/relatorio.txt || true
+          gh release delete e2e-ultimo -y --cleanup-tag || true
+          gh release create e2e-ultimo pub/* --title "Teste no emulador (último)" --notes "Resultado do teste automático de ponta a ponta e o APK compilado." --prerelease
