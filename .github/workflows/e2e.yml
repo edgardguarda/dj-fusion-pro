@@ -1,0 +1,42 @@
+name: Teste no emulador
+on:
+  workflow_dispatch:
+  push:
+    paths: ['projeto.zip']
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Abrir projeto
+        run: mkdir fonte && unzip -q projeto.zip -d fonte
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Compilar app e teste
+        working-directory: fonte
+        run: bash gradlew assembleDebug assembleDebugAndroidTest --console=plain
+      - name: Liberar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulador e teste de ponta a ponta
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-back none -skin 1220x2712
+          disable-animations: true
+          script: bash fonte/ci/e2e.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultado-e2e
+          path: |
+            e2e/
+            fonte/app/build/outputs/apk/debug/*.apk
