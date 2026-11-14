@@ -16,6 +16,8 @@ jobs:
           mkdir fonte && unzip -q projeto.zip -d fonte
           # correções pequenas enviadas depois do projeto (arquivos .patch na pasta correcoes; a antiga sobrepor já está dentro do projeto 2.6.0)
           for p in correcoes/*.patch; do if [ -f "$p" ]; then (cd fonte && patch -p1 -N < "../$p") || true; fi; done
+          # mapas prontos de controladoras (gerados dos mapas públicos do Mixxx) entram no app
+          mkdir -p fonte/app/src/main/assets && cp dados/*.json fonte/app/src/main/assets/ 2>/dev/null || true
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
