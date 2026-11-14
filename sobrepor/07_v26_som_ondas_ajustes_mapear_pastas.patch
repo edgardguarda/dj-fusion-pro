@@ -1,0 +1,1268 @@
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/build.gradle.kts g/app/build.gradle.kts
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -12,8 +12,8 @@
+         applicationId = "app.djfusion.pro"   // provisório, muda no /replica-brand
+         minSdk = 27                           // AAudio disponível
+         targetSdk = 35
+-        versionCode = 25
+-        versionName = "2.5.0"
++        versionCode = 26
++        versionName = "2.6.0"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+ 
+         ndk {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/androidTest/java/app/djfusion/E2ETest.kt g/app/src/androidTest/java/app/djfusion/E2ETest.kt
+--- a/app/src/androidTest/java/app/djfusion/E2ETest.kt
++++ b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+@@ -28,6 +28,7 @@
+ import androidx.test.uiautomator.UiDevice
+ import androidx.test.uiautomator.Until
+ import app.djfusion.ui.AppViewModel
++import app.djfusion.ui.DisplayPrefs
+ import org.junit.Assert.assertTrue
+ import org.junit.Rule
+ import org.junit.Test
+@@ -334,6 +335,7 @@
+             tap("Importar uma pasta inteira de músicas")
+             pickFolder()
+             waitFor(15_000, "faixas da pasta") { vm.tracks.value.count { it.title.startsWith("e2e_") } >= 3 }
++            waitFor(3000, "pasta lembrada") { vm.folders.value.size == 1 }
+         }
+         if (vm.tracks.value.none { it.title.startsWith("e2e_126") }) vm.importUris(listOf(uriB, uriC))
+         waitFor(10_000, "3 faixas") { vm.tracks.value.map { it.title }.toSet().count { it.startsWith("e2e_") } >= 3 }
+@@ -1020,18 +1022,21 @@
+         tab("AJUSTES")
+         step("AJUSTES: latência baixa, normal e quantize") {
+             rule.waitForIdle()
++            tap("Seção de ajustes SOM", substring = true); SystemClock.sleep(300); rule.waitForIdle()
+             tap("Latência baixa", substring = true)
+             waitFor(2000, "latência baixa") { vm.latency.value == 0 }
+             SystemClock.sleep(1200)
+             log("info  latência baixa: ${vm.audioStatus.value}")
+             tap("Latência normal", substring = true)
+             waitFor(2000, "latência normal") { vm.latency.value == 1 }
++            tap("Seção de ajustes PRATOS", substring = true); SystemClock.sleep(300); rule.waitForIdle()
+             node("Modo vinil desligado", true).performScrollTo(); rule.waitForIdle()
+             tap("Modo vinil desligado", substring = true)
+             waitFor(2000, "vinil off") { !vm.vinyl.value }
+             node("Modo vinil ligado", true).performScrollTo(); rule.waitForIdle()
+             tap("Modo vinil ligado", substring = true)
+             waitFor(2000, "vinil on") { vm.vinyl.value }
++            tap("Seção de ajustes MIXAGEM", substring = true); SystemClock.sleep(300); rule.waitForIdle()
+             node("Quantize desligado", true).performScrollTo(); rule.waitForIdle()
+             tap("Quantize desligado", substring = true)
+             waitFor(2000, "quantize off") { !vm.quantize.value }
+@@ -1044,6 +1049,7 @@
+             log("info  " + vm.message.value)
+         }
+         step("saída de áudio: modo dividido") {
++            tap("Seção de ajustes SOM", substring = true); SystemClock.sleep(300); rule.waitForIdle()
+             tap("Modo de saída", substring = true)
+             SystemClock.sleep(1500)
+             log("info  saída: ${vm.outputNote.value}")
+@@ -1051,6 +1057,7 @@
+             SystemClock.sleep(1000)
+         }
+         step("MIXAGEM: curva do crossfader") {
++            tap("Seção de ajustes MIXAGEM", substring = true); SystemClock.sleep(300); rule.waitForIdle()
+             node("Crossfader mixagem", true).performScrollTo(); rule.waitForIdle()
+             tap("Crossfader mixagem", substring = true)
+             waitFor(2000, "curva mixagem") { vm.xfCurve.value == 1 }
+@@ -1060,6 +1067,29 @@
+             waitFor(2000, "curva suave") { vm.xfCurve.value == 0 }
+             shot("ajustes_mixagem")
+         }
++        step("TELA: cor das ondas (vermelho, cinza, espectro)") {
++            tap("Seção de ajustes TELA", substring = true); SystemClock.sleep(300); rule.waitForIdle()
++            tap("Ondas em tons de cinza", substring = true)
++            waitFor(2000, "cinza") { DisplayPrefs.waveStyle == 1 }
++            tap("Ondas coloridas pelo espectro", substring = true)
++            waitFor(2000, "espectro") { DisplayPrefs.waveStyle == 2 }
++            tap("Ondas em tons de vermelho", substring = true)
++            waitFor(2000, "vermelho") { DisplayPrefs.waveStyle == 0 }
++            shot("ajustes_tela")
++        }
++        step("SOM volta sozinho quando a saída cai (controladora tirada)") {
++            val nE = app.djfusion.audio.NativeEngine
++            val c0 = nE.nativeAudioCallbacks()
++            SystemClock.sleep(300)
++            check(nE.nativeAudioCallbacks() != c0, "o som não estava rodando antes")
++            nE.nativeDebugKillStream()
++            SystemClock.sleep(400)
++            val c1 = nE.nativeAudioCallbacks()
++            SystemClock.sleep(300)
++            check(nE.nativeAudioCallbacks() == c1, "a saída não caiu no teste")
++            waitFor(8000, "som religado") { val a = nE.nativeAudioCallbacks(); SystemClock.sleep(200); nE.nativeAudioCallbacks() != a }
++            log("info  " + vm.message.value)
++        }
+         step("CUES AUTOMÁTICAS e nome da hot cue") {
+             rule.runOnUiThread { vm.prepareCues(0) }
+             waitFor(3000, "cues automáticas") { (0..3).any { vm.decks.value[0].hotcues[it] >= 0 } }
+@@ -1150,6 +1180,17 @@
+             waitFor(2000, "pause B") { !vm.decks.value[1].playing }
+             log("info  diagnóstico (início): " + vm.diagnosticsText().lines().take(12).joinToString(" | "))
+         }
++        step("MAPEAR: assistente essencial pede só o que falta") {
++            rule.runOnUiThread { vm.midi.startWizard(essentialOnly = true) }
++            SystemClock.sleep(300); rule.waitForIdle()
++            val l = vm.midi.learning.value
++            log("info  assistente essencial começou em: $l")
++            check(l != null && l in app.djfusion.midi.MidiTargets.essential, "assistente pediu $l")
++            rule.runOnUiThread { vm.midi.skipLearn() }
++            check(vm.midi.learning.value != l, "PULAR não andou")
++            shot("mapear")
++            rule.runOnUiThread { vm.midi.cancelLearn() }
++        }
+         step("CONTROLADORA qualquer: aviso de modo ignorado, codificações do prato, calibração e BUSCA") {
+             fun midi(vararg b: Int) = rule.runOnUiThread { vm.midi.inject(ByteArray(b.size) { b[it].toByte() }) }
+             val nE = app.djfusion.audio.NativeEngine
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/cpp/audio_host.h g/app/src/main/cpp/audio_host.h
+--- a/app/src/main/cpp/audio_host.h
++++ b/app/src/main/cpp/audio_host.h
+@@ -12,6 +12,8 @@
+ #include <atomic>
+ #include <memory>
+ #include <mutex>
++#include <thread>
++#include <chrono>
+ 
+ #include "core/engine.h"
+ 
+@@ -165,6 +167,7 @@
+       done += n;
+     }
+     // Se houve underrun, aumenta o buffer (mais folga, um pouco mais de latência) até estabilizar.
++    cbCount_.fetch_add(1, std::memory_order_relaxed);
+     if ((++cb_ & 31) == 0) {
+       auto x = st->getXRunCount();
+       if (x.error() == oboe::Result::OK && x.value() > lastXrun_) {
+@@ -194,14 +197,38 @@
+   }
+ 
+   // Fone desligado, USB removido ou rota trocada: o Oboe fecha o fluxo e avisa aqui. Reabrimos.
+-  void onErrorAfterClose(oboe::AudioStream*, oboe::Result error) override {
++  // A reabertura acontece numa linha própria (o Oboe pede para não abrir dentro do aviso) e espera a vez do
++  // cadeado: antes, se outra parte do app estivesse mexendo na saída nesse instante (a controladora USB saindo e o
++  // Android avisando ao mesmo tempo), a reabertura era abandonada e o som ficava mudo até reiniciar o app.
++  void onErrorAfterClose(oboe::AudioStream* closed, oboe::Result error) override {
+     __android_log_print(ANDROID_LOG_WARN, "DJFusion", "erro de áudio: %s", oboe::convertToText(error));
+-    std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
+-    if (!lock.owns_lock()) return;  // stop() está em andamento
+-    stream_.reset();
+-    mirrorActive_.store(false, std::memory_order_release);
+-    if (mirrorStream_) { mirrorStream_->requestStop(); mirrorStream_->close(); mirrorStream_.reset(); }
+-    if (wanted_) openLocked();
++    auto self = std::static_pointer_cast<AudioHost>(shared_from_this());
++    std::thread([self, closed] {
++      std::this_thread::sleep_for(std::chrono::milliseconds(120));
++      std::lock_guard<std::mutex> lock(self->mutex_);
++      if (!self->wanted_) return;
++      if (self->stream_ && self->stream_.get() != closed && self->stream_->getState() == oboe::StreamState::Started) return;
++      self->stream_.reset();
++      self->closeLocked();
++      self->openLocked();
++    }).detach();
++  }
++
++  /** Quantas vezes o áudio pediu som (para o app ver se a saída travou). */
++  uint32_t callbacks() const { return cbCount_.load(std::memory_order_relaxed); }
++
++  /** Teste: derruba a saída sem desligar o som (como a controladora USB sendo tirada). */
++  void debugKill() {
++    std::lock_guard<std::mutex> lock(mutex_);
++    closeLocked();
++  }
++
++  /** Fecha e abre a saída de novo (som mudo detectado pelo app). */
++  void restart() {
++    std::lock_guard<std::mutex> lock(mutex_);
++    if (!wanted_) return;
++    closeLocked();
++    openLocked();
+   }
+ 
+  private:
+@@ -333,6 +360,7 @@
+   std::shared_ptr<oboe::AudioStream> stream_;
+   bool wanted_ = false;
+   uint32_t cb_ = 0;
++  std::atomic<uint32_t> cbCount_{0};
+   int32_t lastXrun_ = 0;
+   std::atomic<int32_t> info_[7] = {{0}, {0}, {0}, {0}, {0}, {0}, {0}};
+   int reqMode_ = 0, reqDevice_ = 0, reqMirror_ = 0;
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/cpp/native_bridge.cpp g/app/src/main/cpp/native_bridge.cpp
+--- a/app/src/main/cpp/native_bridge.cpp
++++ b/app/src/main/cpp/native_bridge.cpp
+@@ -45,7 +45,18 @@
+   hostPtr()->configureOutput(mode, deviceId, mirrorDevice, mirrorWhat);
+ }
+ 
++// Duração máxima de faixa (segundos) para o decodificador próprio; o app define pela memória do aparelho.
++static std::atomic<int> gMaxTrackSeconds{900};
++
++JNI(void, nativeSetMaxTrackSeconds)(JNIEnv*, jclass, jint s) { gMaxTrackSeconds.store(s < 60 ? 60 : s); }
++
+ JNI(void, nativeStop)(JNIEnv*, jclass) { hostPtr()->stop(); }
++
++JNI(jint, nativeAudioCallbacks)(JNIEnv*, jclass) { return static_cast<jint>(hostPtr()->callbacks()); }
++
++JNI(void, nativeRestartAudio)(JNIEnv*, jclass) { hostPtr()->restart(); }
++
++JNI(void, nativeDebugKillStream)(JNIEnv*, jclass) { hostPtr()->debugKill(); }
+ JNI(void, nativeSetLatency)(JNIEnv*, jclass, jint mode) { hostPtr()->setLatencyMode(mode); }
+ 
+ JNI(void, nativeStreamInfo)(JNIEnv* env, jclass, jintArray out) {
+@@ -122,7 +133,7 @@
+   gDecProgress[slot].store(0.f);
+   if (fd < 0 || kind < 1 || kind > 3) return 0;
+   djf::DecodeOut r = djf::decodeFile(fd, static_cast<djf::FileKind>(kind), fileSize, djf::kEngineRate,
+-                                     static_cast<int64_t>(djf::kEngineRate) * 900, &gDecProgress[slot], nullptr);
++                                     static_cast<int64_t>(djf::kEngineRate) * gMaxTrackSeconds.load(), &gDecProgress[slot], nullptr);
+   {
+     std::lock_guard<std::mutex> lock(gDecErrMutex);
+     gDecErr[slot] = r.error + (r.channels > 0 ? " [" + std::to_string(r.srcRate) + " Hz, " + std::to_string(r.channels) + " canais]" : "");
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/audio/NativeEngine.kt g/app/src/main/java/app/djfusion/audio/NativeEngine.kt
+--- a/app/src/main/java/app/djfusion/audio/NativeEngine.kt
++++ b/app/src/main/java/app/djfusion/audio/NativeEngine.kt
+@@ -14,11 +14,22 @@
+     /** Todas as faixas são decodificadas nesta taxa. */
+     const val SAMPLE_RATE = 48_000
+     const val PEAKS_PER_SECOND = 150
+-    const val MAX_TRACK_SECONDS = 15 * 60
++    /**
++     * Duração máxima de uma faixa, em segundos. Definida ao abrir o app conforme a memória do aparelho
++     * (cerca de 8% da memória total por faixa; 15 a 120 minutos). Faixas curtas não reservam nada a mais.
++     */
++    @JvmStatic @Volatile var MAX_TRACK_SECONDS: Int = 15 * 60
+ 
+     // saída de áudio
+     @JvmStatic external fun nativeStart(): Boolean
+     @JvmStatic external fun nativeStop()
++    /** Contador de pedidos de som da saída (parado = saída travada/sumiu). */
++    @JvmStatic external fun nativeAudioCallbacks(): Int
++    @JvmStatic external fun nativeSetMaxTrackSeconds(seconds: Int)
++    /** Fecha e reabre a saída de áudio. */
++    @JvmStatic external fun nativeRestartAudio()
++    /** Só para o teste automático: derruba a saída como se a controladora USB fosse tirada. */
++    @JvmStatic external fun nativeDebugKillStream()
+     /** Latência da saída: 0 baixa, 1 normal, 2 segura. */
+     @JvmStatic external fun nativeSetLatency(mode: Int)
+     /** [taxa real, quadros por rajada, tamanho do buffer em quadros, 1 se exclusivo, canais, modo efetivo do fone] */
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/audio/TrackDecoder.kt g/app/src/main/java/app/djfusion/audio/TrackDecoder.kt
+--- a/app/src/main/java/app/djfusion/audio/TrackDecoder.kt
++++ b/app/src/main/java/app/djfusion/audio/TrackDecoder.kt
+@@ -138,7 +138,7 @@
+                             return@withContext DecodeResult.Ready(h)
+                         }
+                     } catch (e: TooLong) {
+-                        return@withContext DecodeResult.Failed("Faixa maior que 15 minutos. O limite é 15 minutos.")
++                        return@withContext DecodeResult.Failed("Faixa maior que ${NativeEngine.MAX_TRACK_SECONDS / 60} minutos (limite da memória deste aparelho).")
+                     }
+                 }
+                 // 1) abre e acha a trilha de áudio
+@@ -171,7 +171,7 @@
+                 val mime = fmt.getString(MediaFormat.KEY_MIME) ?: "audio/?"
+                 val durationUs = if (fmt.containsKey(MediaFormat.KEY_DURATION)) fmt.getLong(MediaFormat.KEY_DURATION) else 0L
+                 if (durationUs > NativeEngine.MAX_TRACK_SECONDS * 1_000_000L) {
+-                    return@withContext DecodeResult.Failed("Faixa maior que 15 minutos. O limite é 15 minutos.")
++                    return@withContext DecodeResult.Failed("Faixa maior que ${NativeEngine.MAX_TRACK_SECONDS / 60} minutos (limite da memória deste aparelho).")
+                 }
+                 // 2) tenta cada decodificador até um funcionar
+                 val decoders = decodersFor(fmt, mime)
+@@ -190,7 +190,7 @@
+                     } catch (e: CancellationException) {
+                         throw e
+                     } catch (e: TooLong) {
+-                        return@withContext DecodeResult.Failed("Faixa maior que 15 minutos. O limite é 15 minutos.")
++                        return@withContext DecodeResult.Failed("Faixa maior que ${NativeEngine.MAX_TRACK_SECONDS / 60} minutos (limite da memória deste aparelho).")
+                     } catch (e: Exception) {
+                         lastWhy = "${e.javaClass.simpleName}: ${e.message}"
+                         note("$name: $dec falhou ($mime) -> $lastWhy")
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/data/LibraryDb.kt g/app/src/main/java/app/djfusion/data/LibraryDb.kt
+--- a/app/src/main/java/app/djfusion/data/LibraryDb.kt
++++ b/app/src/main/java/app/djfusion/data/LibraryDb.kt
+@@ -200,6 +200,15 @@
+         writableDatabase.delete("hotcues", "track_id = ? AND slot = ?", arrayOf(trackId.toString(), slot.toString()))
+     }
+ 
++    /** Endereços de todas as faixas da biblioteca (para achar só as músicas novas de uma pasta). */
++    fun allUris(): Set<String> {
++        val out = HashSet<String>()
++        readableDatabase.query("tracks", arrayOf("uri"), null, null, null, null, null).use { c ->
++            while (c.moveToNext()) out.add(c.getString(0))
++        }
++        return out
++    }
++
+     /** Retorna true se a faixa é nova (false se o mesmo arquivo já estava na biblioteca). */
+     fun insert(uri: String, title: String, artist: String, durationMs: Long): Boolean {
+         // o mesmo arquivo aberto por outro caminho (arquivo solto e depois a pasta) não entra duas vezes
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/midi/MidiCore.kt g/app/src/main/java/app/djfusion/midi/MidiCore.kt
+--- a/app/src/main/java/app/djfusion/midi/MidiCore.kt
++++ b/app/src/main/java/app/djfusion/midi/MidiCore.kt
+@@ -79,6 +79,16 @@
+         add(MidiTarget("browsepush", "BROWSE: aperte para abrir a lista de músicas", false))
+     }
+     private val byId = all.associateBy { it.id }
++
++    /** Controles essenciais, na ordem em que o assistente pede (o que praticamente toda controladora tem). */
++    val essentialOrder: List<String> = buildList {
++        for (d in 0..1) addAll(
++            listOf("d$d.play", "d$d.cue", "d$d.sync", "d$d.jog", "d$d.jogtouch", "d$d.tempo", "d$d.vol",
++                "d$d.eqhi", "d$d.eqmid", "d$d.eqlo", "d$d.filter", "d$d.pfl", "d$d.load", "d$d.hot1", "d$d.hot2", "d$d.hot3", "d$d.hot4").map { it },
++        )
++        addAll(listOf("xfade", "master", "hpvol", "hpmix", "browse", "browsepush"))
++    }
++    val essential: Set<String> = essentialOrder.toSet()
+     fun get(id: String): MidiTarget? = byId[id]
+ }
+ 
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/midi/MidiHub.kt g/app/src/main/java/app/djfusion/midi/MidiHub.kt
+--- a/app/src/main/java/app/djfusion/midi/MidiHub.kt
++++ b/app/src/main/java/app/djfusion/midi/MidiHub.kt
+@@ -308,17 +308,31 @@
+ 
+     // --------------------------------------------------------------- aprendizado
+ 
+-    private fun nextEmpty(): String? = MidiTargets.all.firstOrNull { map.keyOf(it.id) == null }?.id
++    /** Assistente só com os controles essenciais (o que toda controladora tem). */
++    @Volatile private var wizardEssential = false
++    private fun wizardList(): List<String> = if (wizardEssential) MidiTargets.essentialOrder else MidiTargets.all.map { it.id }
++    /** Pulados nesta rodada do assistente (não voltam a ser pedidos). */
++    private val skipped = HashSet<String>()
++    private fun nextEmpty(): String? = wizardList().firstOrNull { map.keyOf(it) == null && it !in skipped }
+ 
+     fun learn(target: String) { _wizard.value = false; _learning.value = target }
+     fun cancelLearn() { _learning.value = null; _wizard.value = false }
+-    fun startWizard() {
++    fun startWizard(essentialOnly: Boolean = false) {
++        wizardEssential = essentialOnly
++        skipped.clear()
+         val n = nextEmpty()
+         _wizard.value = n != null
+         _learning.value = n
+     }
+     fun skipLearn() {
+         val cur = _learning.value ?: return
++        skipped.add(cur)
++        if (_wizard.value) {
++            val n = nextEmpty()
++            _learning.value = n
++            if (n == null) _wizard.value = false
++            return
++        }
+         val ids = MidiTargets.all.map { it.id }
+         val next = ids.drop(ids.indexOf(cur) + 1).firstOrNull { map.keyOf(it) == null }
+         _learning.value = next
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/ui/AppViewModel.kt g/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+--- a/app/src/main/java/app/djfusion/ui/AppViewModel.kt
++++ b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+@@ -818,6 +818,30 @@
+      * Chamado pela Activity em onStart (true) e onStop (false). Sem serviço em primeiro plano o Android
+      * não garante áudio em segundo plano, então ao sair o app pausa os decks e fecha a saída de áudio.
+      */
++    private var lastCallbacks = -1
++    private var stalledChecks = 0
++    private var audioStartedAt = 0L
++
++    /**
++     * Vigia da saída de áudio (cerca de 1 vez por segundo): se o som parou de ser pedido (controladora USB tirada,
++     * fone trocado, Android fechou a saída) e não voltou sozinho em 2 segundos, reabre a saída.
++     */
++    private fun audioWatchdog() {
++        if (!foreground || android.os.SystemClock.uptimeMillis() - audioStartedAt < 3000) return
++        val c = NativeEngine.nativeAudioCallbacks()
++        if (c == lastCallbacks) stalledChecks++ else stalledChecks = 0
++        lastCallbacks = c
++        if (stalledChecks >= 2) {
++            stalledChecks = 0
++            audioStartedAt = android.os.SystemClock.uptimeMillis()
++            viewModelScope.launch(Dispatchers.Default) {
++                NativeEngine.nativeRestartAudio()
++                refreshAudioStatus()
++            }
++            say("A saída de som tinha parado (controladora ou fone desconectado). Som religado.")
++        }
++    }
++
+     fun onForeground(on: Boolean) {
+         foreground = on
+         stopJob?.cancel()
+@@ -834,6 +858,7 @@
+     }
+ 
+     private fun startAudio() {
++        audioStartedAt = android.os.SystemClock.uptimeMillis()
+         // Abrir o fluxo exclusivo do Oboe pode demorar: fora da thread principal.
+         viewModelScope.launch(Dispatchers.Default) {
+             NativeEngine.nativeSetLatency(_latency.value)
+@@ -1335,6 +1360,7 @@
+                 phaseLock()
+                 if (tick % 15 == 7) checkOnAir()
+                 if (tick % 6 == 3) silenceGuardTick()
++                if (tick % 30 == 11) audioWatchdog()
+                 if (tick > 10 && tick % 4 == 1) syncLeds()   // LEDs da controladora (depois de tudo iniciado)
+                 if (++tick % 30 == 0) launch(Dispatchers.Default) { NativeEngine.nativeCollectGarbage() }
+                 delay(33)
+@@ -1552,6 +1578,30 @@
+         })
+     }
+ 
++    /** Duração máxima de faixa conforme a memória do aparelho (uma faixa de 1 minuto ocupa ~11 MB). */
++    @Suppress("unused")
++    private val trackLimitSet: Boolean = run {
++        val am = app.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
++        val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
++        val perSec = NativeEngine.SAMPLE_RATE * 4L
++        NativeEngine.MAX_TRACK_SECONDS = ((mi.totalMem * 0.08) / perSec).toInt().coerceIn(15 * 60, 120 * 60)
++        NativeEngine.nativeSetMaxTrackSeconds(NativeEngine.MAX_TRACK_SECONDS)
++        true
++    }
++
++    /** Preferências do visor (tom em letras, tempo restante, cor das ondas) guardadas entre as aberturas do app. */
++    @Suppress("unused")
++    private val displayPrefsLoaded: Boolean = run {
++        DisplayPrefs.keyLetters = outPrefs.getBoolean("key_letters", false)
++        DisplayPrefs.remaining = outPrefs.getBoolean("remaining", false)
++        DisplayPrefs.waveStyle = outPrefs.getInt("wave_style", 0).coerceIn(0, 2)
++        viewModelScope.launch {
++            androidx.compose.runtime.snapshotFlow { Triple(DisplayPrefs.keyLetters, DisplayPrefs.remaining, DisplayPrefs.waveStyle) }
++                .collect { (k, r, w) -> outPrefs.edit().putBoolean("key_letters", k).putBoolean("remaining", r).putInt("wave_style", w).apply() }
++        }
++        true
++    }
++
+     private val _autoCues = MutableStateFlow(outPrefs.getBoolean("auto_cues", true))
+     /** Marca sozinho INÍCIO, GROOVE, DROP e SAÍDA nas hot cues 1–4 de músicas sem cues. */
+     val autoCues: StateFlow<Boolean> = _autoCues.asStateFlow()
+@@ -2159,6 +2209,38 @@
+     }
+ 
+     /** Importa todas as músicas de uma pasta (e subpastas) escolhida no seletor do Android. */
++    private val folderPrefs = app.getSharedPreferences("pastas", android.content.Context.MODE_PRIVATE)
++    private val _folders = MutableStateFlow(folderPrefs.getStringSet("lista", emptySet())!!.toList().sorted())
++    /** Pastas importadas: o app procura músicas novas nelas ao abrir e no botão ATUALIZAR PASTAS. */
++    val folders: StateFlow<List<String>> = _folders.asStateFlow()
++
++    /** Ao abrir o app, procura sozinho músicas novas nas pastas importadas. */
++    @Suppress("unused")
++    private val folderScanAtStart = viewModelScope.launch { delay(5000); rescanFolders(quiet = true) }
++
++    /** Procura músicas novas em todas as pastas importadas (as que já estão na biblioteca são ignoradas). */
++    fun rescanFolders(quiet: Boolean = false) {
++        val list = _folders.value
++        if (list.isEmpty()) { if (!quiet) say("Nenhuma pasta importada ainda. Toque em IMPORTAR PASTA."); return }
++        viewModelScope.launch(Dispatchers.IO) {
++            val found = ArrayList<Uri>()
++            for (f in list) {
++                val tree = Uri.parse(f)
++                try { collectAudio(tree, android.provider.DocumentsContract.getTreeDocumentId(tree), found, 0) } catch (_: Exception) { }
++            }
++            val known = db.allUris()
++            val fresh = found.filter { it.toString() !in known }
++            if (fresh.isEmpty()) { if (!quiet) say("Pastas atualizadas: nenhuma música nova.") ; return@launch }
++            say("Achei ${fresh.size} música(s) nova(s) nas pastas. Importando…")
++            addUris(fresh)
++        }
++    }
++
++    fun forgetFolder(uri: String) {
++        _folders.value = _folders.value - uri
++        folderPrefs.edit().putStringSet("lista", _folders.value.toSet()).apply()
++    }
++
+     fun importFolder(tree: Uri) {
+         say("Procurando músicas na pasta…")
+         viewModelScope.launch(Dispatchers.IO) {
+@@ -2167,6 +2249,10 @@
+                     .takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+             } catch (_: Exception) {
+             }
++            if (tree.toString() !in _folders.value) {
++                _folders.value = (_folders.value + tree.toString()).sorted()
++                folderPrefs.edit().putStringSet("lista", _folders.value.toSet()).apply()
++            }
+             val found = ArrayList<Uri>()
+             try {
+                 val rootId = android.provider.DocumentsContract.getTreeDocumentId(tree)
+@@ -2185,7 +2271,8 @@
+     }
+ 
+     private fun collectAudio(tree: Uri, docId: String, out: MutableList<Uri>, depth: Int) {
+-        if (depth > 8 || out.size > 5000) return
++        // sem limite prático: até 50 níveis de subpastas e 100 mil arquivos por pasta escolhida
++        if (depth > 50 || out.size > 100_000) return
+         val resolver = getApplication<Application>().contentResolver
+         val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId)
+         val cols = arrayOf(
+@@ -2217,13 +2304,16 @@
+         var added = 0
+         var duplicated = 0
+         var invalid = 0
+-        for (uri in uris) {
+-            try {
++        for ((i, uri) in uris.withIndex()) {
++            // música de pasta importada: a permissão da PASTA já vale para todas (o Android guarda no máximo
++            // 512 permissões por app; pedir uma por arquivo fazia bibliotecas grandes perderem as músicas antigas)
++            if (!uri.toString().contains("/tree/")) try {
+                 getApplication<Application>().contentResolver
+                     .takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+             } catch (_: Exception) {
+                 // nem todo provedor oferece permissão persistente
+             }
++            if (uris.size > 40 && i % 25 == 0) say("Importando ${i + 1} de ${uris.size}…")
+             val meta = readMetadata(uri)
+             if (meta == null) {
+                 invalid++
+@@ -2885,7 +2975,7 @@
+     companion object {
+         val BUILTIN_NAMES = listOf("BUZINA", "SIRENE", "LASER", "BUMBO 808", "PALMA", "SUBIDA", "DESCIDA", "EXPLOSÃO")
+         /** Stems só para músicas até este tamanho (memória). */
+-        const val STEM_MAX_MINUTES = 12
++        const val STEM_MAX_MINUTES = 30
+         /** Volume alvo do auto-gain (dBFS RMS). */
+         const val TARGET_DB = -12.0
+         /** Faixas do fader de pitch (em %). */
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/ui/AutoDj.kt g/app/src/main/java/app/djfusion/ui/AutoDj.kt
+--- a/app/src/main/java/app/djfusion/ui/AutoDj.kt
++++ b/app/src/main/java/app/djfusion/ui/AutoDj.kt
+@@ -134,6 +134,8 @@
+         }
+         vm.setVolume(0, 1f)
+         vm.setVolume(1, 1f)
++        // volumes iguais entre as músicas: o AUTO DJ liga o AUTO-GAIN
++        if (!vm.autoGain.value) vm.toggleAutoGain()
+         vm.setCrossfader(if (cur == 0) 0f else 1f)
+         vm.setEq(cur, 0, 0.5f)
+         vm.setKeyLock(cur, true)
+@@ -256,6 +258,7 @@
+                 delay(if (waitSec < 1.0) 10 else 200)
+             }
+             val beats = plan.second
++            lastArtist = vm.decks.value[cur].artist
+             mix(cur, other, k, beats, style)
+             playedCount++
+             cur = other
+@@ -366,6 +369,12 @@
+         // trava de fase: durante toda a mixagem a batida da que entra fica colada na da que sai
+         if (k != null) vm.setSyncLock(other, true)
+         val t0 = System.nanoTime()
++        // o andamento da mixagem segue a MÚSICA, não o relógio: o progresso vem da posição da que entra
++        // (cada compasso da automação cai no compasso da música, mesmo se o aparelho engasgar)
++        var inStart = -1L
++        // fim musical da que sai: se ela acabaria antes da mixagem terminar, o último compasso entra em loop
++        val outEnd = TrackShape.musicalEnd(dc.wave, dc.lengthFrames)
++        var outLooped = false
+         if (style == Style.ECHO) {
+             // a que sai ganha eco no ritmo e some; a que entra sobe rápido
+             NativeEngine.nativeSetFx(cur, 1, 0.8f, (60.0 / dc.playedBpm).toFloat())
+@@ -377,7 +386,22 @@
+             vm.setStemGain(other, 2, 0f)
+         }
+         while (true) {
+-            val t = ((System.nanoTime() - t0) / 1e9 / sec).coerceIn(0.0, 1.0)
++            val tClock = ((System.nanoTime() - t0) / 1e9 / sec).coerceIn(0.0, 1.0)
++            val inPos = vm.live.value.decks[other].positionFrames
++            if (inStart < 0 && System.nanoTime() - t0 > 60_000_000L && vm.decks.value[other].playing) inStart = inPos
++            val t = if (k != null && inStart >= 0 && style != Style.CUT && style != Style.NONE) {
++                ((inPos - inStart) / (beats * nBeat)).coerceIn(0.0, 1.0).let { tp ->
++                    // segurança: se a posição não andar (pausa, erro), o relógio termina a mixagem
++                    if (tClock >= 1.0 && tClock - tp > 0.5) tClock else tp
++                }
++            } else tClock
++            if (!outLooped && k != null && dc.hasBpm && t < 0.9) {
++                val beatsLeft = (outEnd - vm.live.value.decks[cur].positionFrames) / refBeat
++                if (beatsLeft in 0.5..5.0 && vm.decks.value[cur].loopBeats == 0) {
++                    outLooped = true
++                    vm.toggleLoop(cur, 4)
++                }
++            }
+             val s = (t * t * (3 - 2 * t)).toFloat()
+             when (style) {
+                 Style.EQ -> {
+@@ -433,6 +457,7 @@
+             if (t >= 1.0) break
+             delay(30)
+         }
++        if (outLooped && vm.decks.value[cur].loopBeats == 4) vm.toggleLoop(cur, 4)
+         if (style == Style.ECHO) vm.restoreFx(cur)          // volta o efeito que o DJ tinha escolhido
+         if (style == Style.FILTER) vm.setFilter(cur, 0.5f)
+         vm.setCrossfader(nextSide)
+@@ -481,6 +506,9 @@
+         return (d.lengthFrames - pos).coerceAtLeast(0L) / (NativeEngine.SAMPLE_RATE.toDouble() * d.rate.coerceAtLeast(0.1f))
+     }
+ 
++    /** Artista da música anterior à atual (para não repetir artista). */
++    private var lastArtist = ""
++
+     private fun remember(id: Long) {
+         history.addLast(id)
+         while (history.size > 12) history.removeFirst()
+@@ -523,7 +551,9 @@
+                 val diff = c.energy - dc.energy
+                 if (diff < -0.15f) 2.0 * -diff else 1.0 * abs(diff - 0.05f)   // prefere manter ou subir um pouco
+             } else 0.5
+-            val score = bpmPen + keyPen + 4.0 * ePen + Random.nextDouble() * 0.5
++            // não repete o mesmo artista em seguida (nem o da música que acabou de sair)
++            val artistPen = if (c.artist.isNotBlank() && (c.artist.equals(dc.artist, true) || c.artist.equals(lastArtist, true))) 3.0 else 0.0
++            val score = bpmPen + keyPen + 4.0 * ePen + artistPen + Random.nextDouble() * 0.5
+             if (score < bestScore) { bestScore = score; best = c }
+         }
+         return best
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/ui/Components.kt g/app/src/main/java/app/djfusion/ui/Components.kt
+--- a/app/src/main/java/app/djfusion/ui/Components.kt
++++ b/app/src/main/java/app/djfusion/ui/Components.kt
+@@ -452,9 +452,18 @@
+ 
+ /** Cores do espectro (como no Serato): graves vermelho/laranja, médios verde, agudos azul. */
+ private const val SPEC_N = 18
+-private val SPEC_COLORS: IntArray = IntArray(SPEC_N) { i ->
++/**
++ * Cores da onda (18 tons, dos graves aos agudos), conforme o estilo escolhido em AJUSTES › TELA:
++ * 0 VERMELHO (graves vermelho escuro, médios vermelho vivo, agudos rosado quase branco),
++ * 1 CINZA (grafite aos graves, prata aos agudos), 2 ESPECTRO (vermelho/verde/azul, como antes).
++ */
++private fun specColors(style: Int): IntArray = IntArray(SPEC_N) { i ->
+     val t = i / (SPEC_N - 1f)
+-    android.graphics.Color.HSVToColor(floatArrayOf(t * 225f, 0.88f - 0.18f * t, 1f))
++    when (style) {
++        1 -> android.graphics.Color.HSVToColor(floatArrayOf(210f, 0.10f - 0.06f * t, 0.42f + 0.56f * t))
++        2 -> android.graphics.Color.HSVToColor(floatArrayOf(t * 225f, 0.88f - 0.18f * t, 1f))
++        else -> android.graphics.Color.HSVToColor(floatArrayOf(354f + 14f * t, 0.97f - 0.72f * t * t, 0.50f + 0.50f * kotlin.math.sqrt(t)))
++    }
+ }
+ 
+ /** Em qual cor do espectro cai um trecho, pelo peso de graves, médios e agudos. */
+@@ -467,8 +476,11 @@
+     return (t * (SPEC_N - 1)).roundToInt().coerceIn(0, SPEC_N - 1)
+ }
+ 
+-private fun specPaints(): Array<android.graphics.Paint> = Array(SPEC_N) { i ->
+-    android.graphics.Paint().apply { color = SPEC_COLORS[i]; style = android.graphics.Paint.Style.STROKE; isAntiAlias = false }
++private fun specPaints(waveStyle: Int = DisplayPrefs.waveStyle): Array<android.graphics.Paint> {
++    val cols = specColors(waveStyle)
++    return Array(SPEC_N) { i ->
++        android.graphics.Paint().apply { color = cols[i]; style = android.graphics.Paint.Style.STROKE; isAntiAlias = false }
++    }
+ }
+ 
+ /**
+@@ -493,7 +505,8 @@
+     /** Loop ativo (início, fim em quadros) ou null. */
+     loop: Pair<Long, Long>? = null,
+ ) {
+-    val paints = remember { specPaints() }
++    val waveStyle = DisplayPrefs.waveStyle
++    val paints = remember(waveStyle) { specPaints(waveStyle) }
+     val infoPaint = remember {
+         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+             color = android.graphics.Color.WHITE
+@@ -688,7 +701,8 @@
+     loop: Pair<Long, Long>? = null,
+ ) {
+     val latest = rememberUpdatedState(onSeek)
+-    val paints = remember { specPaints() }
++    val waveStyle = DisplayPrefs.waveStyle
++    val paints = remember(waveStyle) { specPaints(waveStyle) }
+     BoxWithConstraints(
+         modifier
+             .background(Color(0xFF050608))
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/ui/HarmonyUi.kt g/app/src/main/java/app/djfusion/ui/HarmonyUi.kt
+--- a/app/src/main/java/app/djfusion/ui/HarmonyUi.kt
++++ b/app/src/main/java/app/djfusion/ui/HarmonyUi.kt
+@@ -50,6 +50,8 @@
+     var keyLetters by androidx.compose.runtime.mutableStateOf(false)
+     /** Visor do deck mostra o tempo que falta em vez do tocado. */
+     var remaining by androidx.compose.runtime.mutableStateOf(false)
++    /** Cor das ondas: 0 vermelho, 1 cinza, 2 espectro. */
++    var waveStyle by androidx.compose.runtime.mutableStateOf(0)
+ }
+ 
+ @Composable
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/ui/LibraryScreen.kt g/app/src/main/java/app/djfusion/ui/LibraryScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/LibraryScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/LibraryScreen.kt
+@@ -55,6 +55,7 @@
+     val analysis by vm.analysisProgress.collectAsStateWithLifecycle()
+     val setOrder by vm.setOrder.collectAsStateWithLifecycle()
+     val activePl by vm.activePlaylist.collectAsStateWithLifecycle()
++    val folders by vm.folders.collectAsStateWithLifecycle()
+     var showPl by remember { mutableStateOf(false) }
+     if (showPl) PlaylistDialog(vm) { showPl = false }
+     val setPos = remember(setOrder) { setOrder.withIndex().associate { it.value to it.index + 1 } }
+@@ -72,35 +73,47 @@
+     Row(Modifier.fillMaxSize().background(Metal.Bg).padding(horizontal = 14.dp, vertical = 8.dp)) {
+     Column(Modifier.weight(1f).fillMaxHeight()) {
+         Row(verticalAlignment = Alignment.CenterVertically) {
+-            OutlinedTextField(
+-                value = search,
+-                onValueChange = vm::setSearch,
+-                singleLine = true,
+-                placeholder = { Text("Buscar", maxLines = 1) },
+-                modifier = Modifier.weight(1f),
+-            )
+-            Spacer(Modifier.width(10.dp))
+             MetalButton(
+                 description = "Importar músicas do aparelho",
+                 onPress = { picker.launch(arrayOf("*/*")) },
+-                modifier = Modifier.width(132.dp).height(56.dp),
++                modifier = Modifier.weight(1f).height(56.dp),
+             ) {
+-                Text("IMPORTAR", color = Metal.OnMetal, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
++                Column(horizontalAlignment = Alignment.CenterHorizontally) {
++                    Text("IMPORTAR", color = Metal.OnMetal, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
++                    Text("MÚSICAS", color = Metal.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
++                }
+             }
+             Spacer(Modifier.width(8.dp))
+             MetalButton(
+                 description = "Importar uma pasta inteira de músicas",
+                 onPress = { folderPicker.launch(null) },
+-                modifier = Modifier.width(110.dp).height(56.dp),
++                led = Metal.Success, ledOn = folders.isNotEmpty(),
++                modifier = Modifier.weight(1.1f).height(56.dp),
+             ) {
+-                Text("PASTA", color = Metal.OnMetal, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
++                Column(horizontalAlignment = Alignment.CenterHorizontally) {
++                    Text("IMPORTAR", color = Metal.OnMetal, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
++                    Text(if (folders.isEmpty()) "PASTA INTEIRA" else "PASTA (${folders.size})", color = Metal.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
++                }
++            }
++            if (folders.isNotEmpty()) {
++                Spacer(Modifier.width(8.dp))
++                MetalButton(
++                    description = "Atualizar as pastas importadas: procurar músicas novas",
++                    onPress = { vm.rescanFolders() },
++                    modifier = Modifier.weight(1f).height(56.dp),
++                ) {
++                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
++                        Text("ATUALIZAR", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
++                        Text("PASTAS", color = Metal.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
++                    }
++                }
+             }
+             Spacer(Modifier.width(8.dp))
+             MetalButton(
+                 description = if (analysis != null) "Parar a análise da biblioteca" else "Analisar andamento e tom de todas as músicas da biblioteca",
+                 onPress = { vm.analyzeLibrary() },
+                 led = Metal.Success, ledOn = analysis != null,
+-                modifier = Modifier.width(132.dp).height(56.dp),
++                modifier = Modifier.weight(1f).height(56.dp),
+             ) {
+                 Text(
+                     if (analysis != null) "PARAR · $analysis" else "ANALISAR",
+@@ -112,11 +125,18 @@
+                 description = "Harmonizar: montar a ordem do set por tom, andamento e energia",
+                 onPress = { vm.harmonize() },
+                 led = Metal.Success, ledOn = setOrder.isNotEmpty(),
+-                modifier = Modifier.width(140.dp).height(56.dp),
++                modifier = Modifier.weight(1f).height(56.dp),
+             ) {
+                 Text("HARMONIZAR", color = Metal.OnMetal, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+             }
+         }
++        OutlinedTextField(
++            value = search,
++            onValueChange = vm::setSearch,
++            singleLine = true,
++            placeholder = { Text("Buscar por música ou artista", maxLines = 1) },
++            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
++        )
+         Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+             Text("Ordenar:", color = Metal.TextMuted, fontSize = 13.sp)
+             SortChip("Recentes", sort == SortOrder.RECENT) { vm.setSort(SortOrder.RECENT) }
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/ui/MidiScreen.kt g/app/src/main/java/app/djfusion/ui/MidiScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/MidiScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/MidiScreen.kt
+@@ -40,123 +40,205 @@
+ import app.djfusion.midi.MidiTargets
+ import app.djfusion.ui.theme.Metal
+ 
++private val MIDI_SECTIONS = listOf(
++    "CONECTADA" to "Controladora ligada, mapa pronto e monitor",
++    "MAPEAR" to "Ensinar os botões de qualquer controladora",
++    "PRATOS" to "Calibrar, codificação, empurrão e BUSCA",
++    "OPÇÕES" to "LEVEL, pads performance e diagnóstico",
++)
++
+ /**
+- * Tela da controladora: mostra se há uma conectada, o que ela está mandando (monitor) e deixa
+- * ensinar cada botão ao app. Não existe mapa pronto de fábrica; o assistente leva o usuário
+- * controle por controle.
++ * Tela da controladora, por assunto: CONECTADA (o que está ligado e o mapa pronto), MAPEAR (ensinar
++ * qualquer controladora, com assistente só do essencial ou completo), PRATOS e OPÇÕES.
+  */
+ @Composable
+ fun MidiScreen(vm: AppViewModel) {
++    var section by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0) }
++    val learning by vm.midi.learning.collectAsStateWithLifecycle()
++    // começou a ensinar (assistente ou um controle): mostra a lista de mapeamento
++    androidx.compose.runtime.LaunchedEffect(learning) { if (learning != null) section = 1 }
++    Row(Modifier.fillMaxSize().background(Metal.Bg).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
++        Column(Modifier.width(210.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
++            for ((i, sec) in MIDI_SECTIONS.withIndex()) {
++                MetalButton(
++                    description = "Seção da controladora ${sec.first}: ${sec.second}",
++                    onPress = { section = i },
++                    led = Metal.DeckA, ledOn = section == i,
++                    modifier = Modifier.fillMaxWidth().height(50.dp),
++                ) {
++                    Column(Modifier.align(Alignment.CenterStart).padding(horizontal = 12.dp)) {
++                        Text(sec.first, color = if (section == i) Metal.DeckA else Metal.OnMetal, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
++                        Text(sec.second, color = Metal.TextMuted, fontSize = 9.sp, maxLines = 1)
++                    }
++                }
++            }
++        }
++        when (section) {
++            0 -> Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
++                ConnectedPanel(vm)
++                MonitorPanel(vm)
++            }
++            1 -> MapSection(vm, Modifier.weight(1f).fillMaxHeight())
++            2 -> Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
++                JogPanel(vm, vm.midi.mapped.collectAsStateWithLifecycle().value.size)
++                BendPanel(vm)
++            }
++            else -> Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
++                OptionsPanel(vm)
++            }
++        }
++    }
++}
++
++@Composable
++private fun ConnectedPanel(vm: AppViewModel) {
+     val hub = vm.midi
+     val devices by hub.devices.collectAsStateWithLifecycle()
++    val mapped by hub.mapped.collectAsStateWithLifecycle()
++    val tempoInv by hub.tempoInv.collectAsStateWithLifecycle()
++    Panel("CONTROLADORA") {
++        if (!hub.supported) {
++            Text("Este aparelho não tem suporte a MIDI.", color = Metal.Danger, fontSize = 14.sp)
++        } else if (devices.isEmpty()) {
++            Text(
++                "Nenhuma controladora detectada. Ligue a controladora no celular pelo cabo USB (com adaptador OTG se precisar). " +
++                    "Pode tirar e colocar com o app aberto: ele reconecta sozinho.",
++                color = Metal.TextMuted, fontSize = 14.sp,
++            )
++        } else {
++            for (d in devices) Text("● $d", color = Metal.Success, fontSize = 16.sp, fontWeight = FontWeight.Bold)
++            Text(
++                if (mapped.isEmpty()) "Conectada, mas ainda sem mapa. Vá em MAPEAR e toque em ASSISTENTE ESSENCIAL (uns 30 controles, 2 minutos)."
++                else "Conectada · ${mapped.size} controles mapeados. Mexa em qualquer controle: ele aparece no monitor.",
++                color = Metal.TextMuted, fontSize = 13.sp,
++            )
++        }
++        Text(
++            "Numark DJ2GO2 Touch: o mapa de fábrica entra sozinho quando ela é ligada. Outras controladoras MIDI (Pioneer, Hercules, " +
++                "Numark, Reloop, Denon, Behringer…): use MAPEAR uma vez e o app guarda.",
++            color = Metal.TextMuted, fontSize = 12.sp,
++        )
++        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().height(44.dp)) {
++            MetalButton(
++                description = "Aplicar o mapa de fábrica da Numark DJ2GO2 Touch",
++                onPress = { hub.applyDj2go2() },
++                modifier = Modifier.weight(1.4f).fillMaxHeight(),
++            ) { Text("MAPA DJ2GO2 TOUCH", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1) }
++            for (deck in 0..1) {
++                val inv = deck in tempoInv
++                MetalButton(
++                    description = "Inverter a direção do fader de tempo do deck ${AppViewModel.deckName(deck)} na controladora",
++                    onPress = { hub.toggleTempoInvert(deck) },
++                    enabled = mapped.containsKey("d$deck.tempo"),
++                    led = Metal.Success, ledOn = inv,
++                    modifier = Modifier.weight(1f).fillMaxHeight(),
++                ) { Text("INVERTER TEMPO ${AppViewModel.deckName(deck)}", color = Metal.OnMetal, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1) }
++            }
++        }
++    }
++}
++
++@Composable
++private fun MonitorPanel(vm: AppViewModel) {
++    val hub = vm.midi
+     val log by hub.log.collectAsStateWithLifecycle()
++    Panel("MONITOR (o que a controladora está enviando)") {
++        val action by hub.lastAction.collectAsStateWithLifecycle()
++        if (action.isNotEmpty()) Text("Último controle: $action", color = Metal.Success, fontSize = 15.sp, fontWeight = FontWeight.Bold)
++        if (log.isEmpty()) Text("Nada ainda. Aperte um botão ou gire o prato da controladora.", color = Metal.TextMuted, fontSize = 13.sp)
++        for (l in log.take(8)) Text(l, color = Metal.Text, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
++    }
++}
++
++@Composable
++private fun BendPanel(vm: AppViewModel) {
++    Panel("EMPURRÃO DO PRATO (girar com a música tocando)") {
++        var bend by remember { mutableStateOf(vm.jog.bendGain) }
++        Text("Força: x${"%.2f".format(java.util.Locale.ROOT, bend)} (uma volta = ${"%.2f".format(java.util.Locale.ROOT, 0.3f * bend)} s)", color = Metal.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
++        MetalFader(
++            value = (bend - 0.25f) / 2.75f, onChange = { bend = 0.25f + it * 2.75f; vm.jog.setBendGain(bend) },
++            accent = Metal.DeckA, description = "Força do ajuste fino do prato da controladora",
++            modifier = Modifier.fillMaxWidth().height(36.dp), vertical = false,
++        )
++        Text("BUSCA (botão na onda do deck A ou um botão ensinado): o prato corre a música 20 vezes mais rápido, sem som, para achar um ponto.", color = Metal.TextMuted, fontSize = 12.sp)
++    }
++}
++
++@Composable
++private fun OptionsPanel(vm: AppViewModel) {
++    Panel("OPÇÕES DA CONTROLADORA") {
++        val levelFilter by vm.levelAsFilter.collectAsStateWithLifecycle()
++        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().height(44.dp)) {
++            MetalButton("Knob LEVEL da controladora controla o volume do deck", { if (levelFilter) vm.toggleLevelAsFilter() }, led = Metal.Success, ledOn = !levelFilter, modifier = Modifier.weight(1f).fillMaxHeight()) {
++                Text("LEVEL = VOLUME", color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
++            }
++            MetalButton("Knob LEVEL da controladora controla o filtro do deck", { if (!levelFilter) vm.toggleLevelAsFilter() }, led = Metal.Success, ledOn = levelFilter, modifier = Modifier.weight(1f).fillMaxHeight()) {
++                Text("LEVEL = FILTRO", color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
++            }
++        }
++        val perf by vm.padPerf.collectAsStateWithLifecycle()
++        MetalButton(
++            description = "Pads da controladora em modo PERFORMANCE",
++            onPress = { vm.togglePadPerf() },
++            led = Metal.Success, ledOn = perf,
++            modifier = Modifier.fillMaxWidth().height(44.dp),
++        ) { Text("PADS PERFORMANCE: ${if (perf) "LIGADO" else "DESLIGADO"}", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1) }
++        Text(
++            "Ligado: os 4 pads de HOT CUE cortam/voltam VOZ, BATERIA, BAIXO e MELODIA (stems) e os 4 pads de LOOP viram SLIP, REVERSO, CENSURA e TOM automático.",
++            color = Metal.TextMuted, fontSize = 12.sp,
++        )
++        Text(
++            "DJ2GO2: PAD MODE escolhe o que os pads fazem: CUES (segurando PAD MODE apaga), AUTO (loops 1, 2, 4, 8), MANUAL (IN, OUT, liga/desliga, volta ao início) e SAMPLER.",
++            color = Metal.TextMuted, fontSize = 12.sp,
++        )
++    }
++    Panel("DIAGNÓSTICO") {
++        MetalButton("Copiar e salvar o relatório de diagnóstico", { vm.exportDiagnostics() }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
++            Text("RELATÓRIO DE DIAGNÓSTICO (copiar e salvar)", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
++        }
++        Text("Se algo não funcionar, toque aqui e me mande o texto (fica copiado e salvo em Download).", color = Metal.TextMuted, fontSize = 11.sp)
++    }
++}
++
++/** Grupos da lista de mapeamento. */
++private val MAP_GROUPS = listOf("ESSENCIAIS", "DECK A", "DECK B", "MIXER E GERAL", "TODOS")
++
++@Composable
++private fun MapSection(vm: AppViewModel, modifier: Modifier) {
++    val hub = vm.midi
+     val learning by hub.learning.collectAsStateWithLifecycle()
+     val mapped by hub.mapped.collectAsStateWithLifecycle()
+-    val tempoInv by hub.tempoInv.collectAsStateWithLifecycle()
+     val wizard by hub.wizard.collectAsStateWithLifecycle()
+-
+-    Row(Modifier.fillMaxSize().background(Metal.Bg).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+-        Column(
+-            Modifier.weight(0.9f).fillMaxHeight().verticalScroll(rememberScrollState()),
+-            verticalArrangement = Arrangement.spacedBy(10.dp),
+-        ) {
+-            JogPanel(vm, mapped.size)
+-            Panel("CONTROLADORA") {
+-                if (!hub.supported) {
+-                    Text("Este aparelho não tem suporte a MIDI.", color = Metal.Danger, fontSize = 14.sp)
+-                } else if (devices.isEmpty()) {
++    var group by remember { mutableStateOf(0) }
++    Row(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
++        Column(Modifier.weight(0.85f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
++            Panel("MAPEAR QUALQUER CONTROLADORA") {
++                val cur = learning?.let { MidiTargets.get(it) }
++                if (cur != null) {
++                    Text("Agora: aperte ou gire na controladora", color = Metal.TextMuted, fontSize = 12.sp)
++                    Text(cur.label, color = Metal.Warning, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
++                } else {
++                    Text("${mapped.size} de ${MidiTargets.all.size} controles ensinados · essenciais: ${MidiTargets.essential.count { mapped.containsKey(it) }} de ${MidiTargets.essential.size}", color = Metal.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                     Text(
+-                        "Nenhuma controladora detectada. Ligue a Numark (ou outra) no celular pelo cabo USB, com adaptador OTG se precisar.",
+-                        color = Metal.TextMuted, fontSize = 14.sp,
++                        "ASSISTENTE ESSENCIAL pede só o que toda controladora tem (play, cue, sync, prato, volumes, tempo, EQ, fone, crossfader, BROWSE e LOAD). " +
++                            "O COMPLETO passa por todas as funções. Controle que a sua não tem: PULAR.",
++                        color = Metal.TextMuted, fontSize = 12.sp,
+                     )
+-                } else {
+-                    for (d in devices) Text("● $d", color = Metal.Success, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+-                    Text("Conectada. Mexa em qualquer controle: ele aparece no monitor abaixo.", color = Metal.TextMuted, fontSize = 13.sp)
+                 }
+-                Text(
+-                    "Numark DJ2GO2 Touch: o mapa de fábrica (prato com scratch, play, cue, sync, fone, pads, tempo, volumes e crossfader) " +
+-                        "entra sozinho quando ela é ligada. Use o botão abaixo para reaplicá-lo.",
+-                    color = Metal.TextMuted, fontSize = 12.sp,
+-                )
+-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().height(44.dp)) {
++                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().height(46.dp)) {
+                     MetalButton(
+-                        description = "Aplicar o mapa de fábrica da Numark DJ2GO2 Touch",
+-                        onPress = { hub.applyDj2go2() },
+-                        modifier = Modifier.weight(1.4f).fillMaxHeight(),
+-                    ) { Text("MAPA DJ2GO2 TOUCH", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1) }
+-                    for (deck in 0..1) {
+-                        val inv = deck in tempoInv
+-                        MetalButton(
+-                            description = "Inverter a direção do fader de tempo do deck ${AppViewModel.deckName(deck)} na controladora",
+-                            onPress = { hub.toggleTempoInvert(deck) },
+-                            enabled = mapped.containsKey("d$deck.tempo"),
+-                            led = Metal.Success, ledOn = inv,
+-                            modifier = Modifier.weight(1f).fillMaxHeight(),
+-                        ) { Text("INVERTER TEMPO ${AppViewModel.deckName(deck)}", color = Metal.OnMetal, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1) }
+-                    }
+-                }
+-                val perf by vm.padPerf.collectAsStateWithLifecycle()
+-                MetalButton(
+-                    description = "Pads da controladora em modo PERFORMANCE",
+-                    onPress = { vm.togglePadPerf() },
+-                    led = Metal.Success, ledOn = perf,
+-                    modifier = Modifier.fillMaxWidth().height(44.dp),
+-                ) { Text("PADS PERFORMANCE: ${if (perf) "LIGADO" else "DESLIGADO"}", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1) }
+-                Text(
+-                    "Ligado: os 4 pads de HOT CUE da controladora cortam/voltam VOZ, BATERIA, BAIXO e MELODIA (stems) e os 4 pads de LOOP " +
+-                        "viram SLIP, REVERSO, CENSURA e TOM automático. Todas as funções novas também podem ser ensinadas a qualquer botão abaixo.",
+-                    color = Metal.TextMuted, fontSize = 12.sp,
+-                )
+-            }
+-            Panel("MONITOR (o que a controladora está enviando)") {
+-                val action by hub.lastAction.collectAsStateWithLifecycle()
+-                if (action.isNotEmpty()) Text("Último controle: $action", color = Metal.Success, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+-                if (log.isEmpty()) Text("Nada ainda. Aperte um botão ou gire o prato da controladora.", color = Metal.TextMuted, fontSize = 13.sp)
+-                for (l in log.take(8)) Text(l, color = Metal.Text, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+-            }
+-            Panel("AJUSTES DA CONTROLADORA") {
+-                val levelFilter by vm.levelAsFilter.collectAsStateWithLifecycle()
+-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().height(44.dp)) {
+-                    MetalButton("Knob LEVEL da controladora controla o volume do deck", { if (levelFilter) vm.toggleLevelAsFilter() }, led = Metal.Success, ledOn = !levelFilter, modifier = Modifier.weight(1f).fillMaxHeight()) {
+-                        Text("LEVEL = VOLUME", color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+-                    }
+-                    MetalButton("Knob LEVEL da controladora controla o filtro do deck", { if (!levelFilter) vm.toggleLevelAsFilter() }, led = Metal.Success, ledOn = levelFilter, modifier = Modifier.weight(1f).fillMaxHeight()) {
+-                        Text("LEVEL = FILTRO", color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+-                    }
+-                }
+-                var bend by remember { mutableStateOf(vm.jog.bendGain) }
+-                Text("Ajuste fino pela borda do prato: x${"%.2f".format(java.util.Locale.ROOT, bend)}", color = Metal.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+-                MetalFader(
+-                    value = (bend - 0.25f) / 2.75f, onChange = { bend = 0.25f + it * 2.75f; vm.jog.setBendGain(bend) },
+-                    accent = Metal.DeckA, description = "Força do ajuste fino do prato da controladora",
+-                    modifier = Modifier.fillMaxWidth().height(36.dp), vertical = false,
+-                )
+-                Text(
+-                    "PAD MODE da DJ2GO2 escolhe o que os pads fazem: CUES (hot cues; segurando PAD MODE apaga), AUTO (loops 1, 2, 4, 8), " +
+-                        "MANUAL (IN, OUT, liga/desliga, volta ao início) e SAMPLER (sons dos pads). BROWSE escolhe a música e LOAD A/B carrega.",
+-                    color = Metal.TextMuted, fontSize = 12.sp,
+-                )
+-                MetalButton("Copiar e salvar o relatório de diagnóstico", { vm.exportDiagnostics() }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+-                    Text("RELATÓRIO DE DIAGNÓSTICO (copiar e salvar)", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+-                }
+-                Text("Se algo não funcionar, toque aqui e me mande o texto (fica copiado e salvo em Download).", color = Metal.TextMuted, fontSize = 11.sp)
+-            }
+-            Panel("ENSINAR OS CONTROLES") {
+-                Text(
+-                    "${mapped.size} de ${MidiTargets.all.size} controles ensinados.",
+-                    color = Metal.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+-                )
+-                Text(
+-                    "Toque em ASSISTENTE: o app pede um controle por vez. Aperte ou gire o controle correspondente na controladora. Use PULAR para o que ela não tem.",
+-                    color = Metal.TextMuted, fontSize = 12.sp,
+-                )
+-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().height(44.dp)) {
+-                    MetalButton(
+-                        description = if (wizard) "Parar o assistente" else "Iniciar o assistente de aprendizado",
+-                        onPress = { if (wizard) hub.cancelLearn() else hub.startWizard() },
++                        description = if (wizard) "Parar o assistente" else "Iniciar o assistente essencial de aprendizado",
++                        onPress = { if (wizard) hub.cancelLearn() else hub.startWizard(essentialOnly = true) },
+                         led = Metal.Success, ledOn = wizard,
++                        modifier = Modifier.weight(1.3f).fillMaxHeight(),
++                    ) { Text(if (wizard) "PARAR" else "ASSISTENTE ESSENCIAL", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1) }
++                    MetalButton(
++                        description = "Iniciar o assistente de aprendizado",
++                        onPress = { hub.startWizard() }, enabled = !wizard,
+                         modifier = Modifier.weight(1f).fillMaxHeight(),
+-                    ) { Text(if (wizard) "PARAR" else "ASSISTENTE", color = Metal.OnMetal, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold) }
++                    ) { Text("COMPLETO", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold) }
++                }
++                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().height(46.dp)) {
+                     MetalButton(
+                         description = "Pular este controle",
+                         onPress = { hub.skipLearn() }, enabled = learning != null,
+@@ -166,19 +248,30 @@
+                         description = "Apagar tudo que foi ensinado",
+                         onPress = { hub.clearAll() }, enabled = mapped.isNotEmpty(),
+                         modifier = Modifier.weight(1f).fillMaxHeight(),
+-                    ) { Text("LIMPAR", color = Metal.Danger, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold) }
++                    ) { Text("LIMPAR TUDO", color = Metal.Danger, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold) }
+                 }
+             }
++            MonitorPanel(vm)
+         }
+-        Column(Modifier.weight(1.1f).fillMaxHeight().background(Metal.Surface, RoundedCornerShape(10.dp)).padding(8.dp)) {
+-            val cur = learning?.let { MidiTargets.get(it) }
+-            Text(
+-                if (cur != null) "Aperte ou gire na controladora: ${cur.label}" else "Controles",
+-                color = if (cur != null) Metal.Warning else Metal.TextMuted,
+-                fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp),
+-            )
+-            LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+-                items(MidiTargets.all, key = { it.id }) { t ->
++        Column(Modifier.weight(1.15f).fillMaxHeight().background(Metal.Surface, RoundedCornerShape(10.dp)).padding(8.dp)) {
++            Row(Modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
++                for ((i, g) in MAP_GROUPS.withIndex()) {
++                    MetalButton(
++                        description = "Mostrar controles: $g",
++                        onPress = { group = i }, led = Metal.DeckA, ledOn = group == i,
++                        modifier = Modifier.weight(1f).fillMaxHeight(),
++                    ) { Text(g, color = Metal.OnMetal, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, modifier = Modifier.align(Alignment.Center)) }
++                }
++            }
++            val list = when (group) {
++                0 -> MidiTargets.all.filter { it.id in MidiTargets.essential }
++                1 -> MidiTargets.all.filter { it.id.startsWith("d0.") }
++                2 -> MidiTargets.all.filter { it.id.startsWith("d1.") }
++                3 -> MidiTargets.all.filter { !it.id.startsWith("d0.") && !it.id.startsWith("d1.") }
++                else -> MidiTargets.all
++            }
++            LazyColumn(Modifier.fillMaxSize().padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
++                items(list, key = { it.id }) { t ->
+                     val key = mapped[t.id]
+                     val active = learning == t.id
+                     Row(
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md f/app/src/main/java/app/djfusion/ui/SettingsScreen.kt g/app/src/main/java/app/djfusion/ui/SettingsScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/SettingsScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/SettingsScreen.kt
+@@ -9,11 +9,13 @@
+ import androidx.compose.foundation.layout.fillMaxWidth
+ import androidx.compose.foundation.layout.height
+ import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.width
+ import androidx.compose.foundation.rememberScrollState
+ import androidx.compose.foundation.verticalScroll
+ import androidx.compose.material3.Text
+ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.getValue
++import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.text.font.FontWeight
+@@ -22,27 +24,50 @@
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
+ import app.djfusion.ui.theme.Metal
+ 
+-/** Tela AJUSTES: saída de áudio, latência, quantize e visor. */
++/** Seções da tela AJUSTES: uma de cada vez, escolhida na coluna da esquerda. */
++private val SETTINGS_SECTIONS = listOf(
++    "SOM" to "Saída de áudio, fone e latência",
++    "MIXAGEM" to "Crossfader, pitch, quantize, cues automáticas e proteção",
++    "PRATOS" to "Vinil e como o prato da tela responde",
++    "TELA" to "Cores das ondas, tom, tempo e modo em pé",
++    "NOITE" to "Músicas que tocaram hoje",
++    "BACKUP" to "Guardar e restaurar biblioteca e ajustes",
++    "SOBRE" to "Versão do app",
++)
++
++/** Tela AJUSTES organizada por assunto: à esquerda os assuntos, à direita só os ajustes do assunto escolhido. */
+ @Composable
+ fun SettingsScreen(vm: AppViewModel) {
+-    Row(Modifier.fillMaxSize().background(Metal.Bg).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+-        Column(
+-            Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+-            verticalArrangement = Arrangement.spacedBy(10.dp),
+-        ) {
+-            OutputPanel(vm)
+-            MixPanel(vm)
+-            HistoryPanel(vm)
+-            BackupPanel(vm)
++    var section by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(0) }
++    Row(Modifier.fillMaxSize().background(Metal.Bg).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
++        Column(Modifier.width(210.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
++            for ((i, sec) in SETTINGS_SECTIONS.withIndex()) {
++                MetalButton(
++                    description = "Seção de ajustes ${sec.first}: ${sec.second}",
++                    onPress = { section = i },
++                    led = Metal.DeckA, ledOn = section == i,
++                    modifier = Modifier.fillMaxWidth().height(50.dp),
++                ) {
++                    Column(Modifier.align(Alignment.CenterStart).padding(horizontal = 12.dp)) {
++                        Text(sec.first, color = if (section == i) Metal.DeckA else Metal.OnMetal, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
++                        Text(sec.second, color = Metal.TextMuted, fontSize = 9.sp, maxLines = 1)
++                    }
++                }
++            }
+         }
+         Column(
+             Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+             verticalArrangement = Arrangement.spacedBy(10.dp),
+         ) {
+-            LatencyPanel(vm)
+-            PlayPanel(vm)
+-            DisplayPanel(vm)
+-            AboutPanel()
++            when (section) {
++                0 -> { OutputPanel(vm); LatencyPanel(vm) }
++                1 -> { MixPanel(vm); PitchPanel(vm); QuantizePanel(vm) }
++                2 -> PlattersPanel(vm)
++                3 -> { WavePanel(); DisplayPanel(vm) }
++                4 -> HistoryPanel(vm)
++                5 -> BackupPanel(vm)
++                else -> AboutPanel()
++            }
+         }
+     }
+ }
+@@ -90,8 +115,7 @@
+ }
+ 
+ @Composable
+-private fun PlayPanel(vm: AppViewModel) {
+-    val q by vm.quantize.collectAsStateWithLifecycle()
++private fun PitchPanel(vm: AppViewModel) {
+     val pr by vm.defaultPitch.collectAsStateWithLifecycle()
+     Panel("PITCH (FAIXA DO FADER)") {
+         val opts = AppViewModel.PITCH_RANGES
+@@ -101,6 +125,10 @@
+         ) { vm.setDefaultPitch(opts[it]) }
+         Text("±8 e ±16: ajuste fino para mixar. ±25 e ±50: efeitos e gêneros bem diferentes. WIDE: de parado até o dobro da velocidade. No deck, toque na etiqueta em cima do fader para trocar só aquele deck.", color = Metal.TextMuted, fontSize = 12.sp)
+     }
++}
++
++@Composable
++private fun PlattersPanel(vm: AppViewModel) {
+     val vinyl by vm.vinyl.collectAsStateWithLifecycle()
+     Panel("PRATOS (JOG)") {
+         ChoiceRow(
+@@ -110,9 +138,15 @@
+             ),
+             if (vinyl) 0 else 1,
+         ) { if ((it == 0) != vinyl) vm.toggleVinyl() }
+-        Text("Com a música parada, girar o prato procura o ponto exato. Tocando: o meio do disco faz scratch (com VINIL) e a borda acelera ou freia para acertar a batida.", color = Metal.TextMuted, fontSize = 12.sp)
++        Text("Com a música parada, girar o prato procura o ponto exato. Tocando: o meio do disco faz scratch (com VINIL) e a borda adianta ou atrasa a batida.", color = Metal.TextMuted, fontSize = 12.sp)
++        Text("Prato da controladora: calibrar, codificação e BUSCA ficam na aba CONTROLADORA.", color = Metal.Text, fontSize = 12.sp)
+     }
+-    Panel("TOQUE") {
++}
++
++@Composable
++private fun QuantizePanel(vm: AppViewModel) {
++    val q by vm.quantize.collectAsStateWithLifecycle()
++    Panel("TOQUE NA BATIDA (QUANTIZE)") {
+         ChoiceRow(
+             listOf(
+                 "QUANTIZE LIGADO" to "Quantize ligado: hot cues e loops presos na batida",
+@@ -124,6 +158,21 @@
+     }
+ }
+ 
++@Composable
++private fun WavePanel() {
++    Panel("COR DAS ONDAS") {
++        ChoiceRow(
++            listOf(
++                "VERMELHO" to "Ondas em tons de vermelho: graves escuros, agudos claros",
++                "CINZA" to "Ondas em tons de cinza: graves grafite, agudos prata",
++                "ESPECTRO" to "Ondas coloridas pelo espectro: graves vermelhos, médios verdes, agudos azuis",
++            ),
++            DisplayPrefs.waveStyle,
++        ) { DisplayPrefs.waveStyle = it }
++        Text("Em todas as cores: quanto mais claro, mais agudo (pratos, vozes); mais escuro e cheio, mais grave (bumbo, baixo).", color = Metal.TextMuted, fontSize = 12.sp)
++    }
++}
++
+ @Composable
+ private fun MixPanel(vm: AppViewModel) {
+     val curve by vm.xfCurve.collectAsStateWithLifecycle()
