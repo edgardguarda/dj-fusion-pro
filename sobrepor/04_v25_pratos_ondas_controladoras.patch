@@ -1,0 +1,1204 @@
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/build.gradle.kts d/app/build.gradle.kts
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -12,8 +12,8 @@
+         applicationId = "app.djfusion.pro"   // provisório, muda no /replica-brand
+         minSdk = 27                           // AAudio disponível
+         targetSdk = 35
+-        versionCode = 24
+-        versionName = "2.4.0"
++        versionCode = 25
++        versionName = "2.5.0"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+ 
+         ndk {
+@@ -48,6 +48,12 @@
+         jvmTarget = "17"
+     }
+ 
++    // o APK final não pode parar por avisos do lint (o teste no emulador é quem aprova)
++    lint {
++        checkReleaseBuilds = false
++        abortOnError = false
++    }
++
+     // Assinatura fixa do app: todo APK sai com a mesma chave, então a versão nova instala por cima da antiga
+     // (sem desinstalar e sem perder a biblioteca). Uso pessoal; para a Play Store usar uma chave guardada fora do repositório.
+     signingConfigs {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/androidTest/java/app/djfusion/E2ETest.kt d/app/src/androidTest/java/app/djfusion/E2ETest.kt
+--- a/app/src/androidTest/java/app/djfusion/E2ETest.kt
++++ b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+@@ -700,6 +700,17 @@
+             val beat = 48000.0 * 60 / vm.decks.value[0].bpm
+             check(abs((pos(0) - p0) - 4 * beat) < beat * 0.6, "pulou ${(pos(0) - p0) / beat} batidas")
+         }
++        step("ONDA: arrastar procura o ponto com a música parada") {
++            app.djfusion.audio.NativeEngine.nativePause(0); app.djfusion.audio.NativeEngine.nativePause(1)
++            app.djfusion.audio.NativeEngine.nativeSeek(0, 48_000L * 8)
++            SystemClock.sleep(400); rule.waitForIdle()
++            val p0 = pos(0)
++            node("Onda do deck A", substring = true).performTouchInput { swipe(Offset(width * 0.8f, height / 2f), Offset(width * 0.3f, height / 2f), 400) }
++            SystemClock.sleep(300)
++            log("info  arrastar a onda: ${(pos(0) - p0) / 48000.0} s")
++            check(pos(0) - p0 > 48_000L / 2, "arrastar a onda não andou (${pos(0) - p0})")
++            shot("onda_arrastada")
++        }
+         step("GRADE: 1 aqui e BPM fino") {
+             rule.runOnUiThread { vm.setPadMode(0, 6) }
+             SystemClock.sleep(400); rule.waitForIdle()
+@@ -1139,6 +1150,53 @@
+             waitFor(2000, "pause B") { !vm.decks.value[1].playing }
+             log("info  diagnóstico (início): " + vm.diagnosticsText().lines().take(12).joinToString(" | "))
+         }
++        step("CONTROLADORA qualquer: aviso de modo ignorado, codificações do prato, calibração e BUSCA") {
++            fun midi(vararg b: Int) = rule.runOnUiThread { vm.midi.inject(ByteArray(b.size) { b[it].toByte() }) }
++            val nE = app.djfusion.audio.NativeEngine
++            nE.nativePause(0); nE.nativePause(1); SystemClock.sleep(300)
++            // ENSINAR ignora nota fraca (aviso da controladora) e aprende o aperto de verdade
++            rule.runOnUiThread { vm.midi.learn("d1.slip") }
++            midi(0x94, 0x00, 0x07)
++            SystemClock.sleep(100)
++            check(vm.midi.learning.value == "d1.slip", "aprendeu nota fraca")
++            midi(0x94, 0x00, 0x7F)
++            waitFor(1000, "aprender SLIP") { vm.midi.learning.value == null && vm.midi.mapped.value["d1.slip"] != null }
++            // a mesma nota fraca em dois canais (troca de modo da controladora) não aciona nada
++            val slip0 = vm.decks.value[1].slip
++            midi(0x94, 0x00, 0x07); midi(0x95, 0x00, 0x07)
++            SystemClock.sleep(200)
++            check(vm.decks.value[1].slip == slip0, "aviso de modo acionou o SLIP")
++            midi(0x94, 0x00, 0x7F); midi(0x84, 0x00, 0x00)
++            waitFor(1000, "SLIP pelo botão") { vm.decks.value[1].slip != slip0 }
++            rule.runOnUiThread { if (vm.decks.value[1].slip != slip0) vm.toggleSlip(1); vm.midi.clear("d1.slip") }
++            // prato em modo ABSOLUTO (0..127): com o dedo, 9 passos de 10 = 90 passos para frente
++            rule.runOnUiThread { vm.midi.setJogMode(0, 4) }
++            nE.nativeSeek(0, 48_000L * 5); SystemClock.sleep(300)
++            val p0 = pos(0)
++            midi(0x90, 0x06, 0x7F)
++            for (v in 10..100 step 10) { midi(0xB0, 0x06, v); SystemClock.sleep(10) }
++            SystemClock.sleep(200)
++            val p1 = pos(0)
++            midi(0x80, 0x06, 0x00)
++            val expect = 90 * 48000.0 * 1.8 / vm.jog.ticksPerRev
++            log("info  prato absoluto: ${(p1 - p0) / 48000.0} s (esperado ${expect / 48000.0} s)")
++            check(abs((p1 - p0) - expect) < 48000 * 0.05, "prato absoluto andou ${p1 - p0}, esperado $expect")
++            rule.runOnUiThread { vm.midi.setJogMode(0, 0) }
++            // calibração: uma volta da DJ2GO2 = 236 passos
++            rule.runOnUiThread { vm.jog.startCalibration(0) }
++            for (k in 0 until 59) midi(0xB0, 0x06, 0x04)
++            val n = vm.jog.finishCalibration()
++            check(n == 236 && vm.jog.ticksPerRev == 236, "calibração deu $n")
++            // BUSCA: o prato corre a música 20 vezes mais rápido
++            rule.runOnUiThread { vm.jog.setSearch(0, true) }
++            nE.nativeSeek(0, 48_000L * 3); SystemClock.sleep(300)
++            val s0 = pos(0)
++            for (k in 0 until 10) { midi(0xB0, 0x06, 0x05); SystemClock.sleep(5) }
++            SystemClock.sleep(300)
++            log("info  BUSCA: ${(pos(0) - s0) / 48000.0} s com 50 passos")
++            check(pos(0) - s0 > 48_000L * 5, "BUSCA andou só ${(pos(0) - s0) / 48000.0} s")
++            rule.runOnUiThread { vm.jog.setSearch(0, false) }
++        }
+ 
+         tab("BIBLIOTECA")
+         rule.waitForIdle()
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/cpp/audio_host.h d/app/src/main/cpp/audio_host.h
+--- a/app/src/main/cpp/audio_host.h
++++ b/app/src/main/cpp/audio_host.h
+@@ -95,13 +95,22 @@
+   // 2 = quatro canais (1-2 som geral, 3-4 fone). deviceId: aparelho de saída (0 = o padrão do Android).
+   // Se o aparelho não aceitar quatro canais, cai para o modo 1; se não abrir de jeito nenhum, volta ao padrão.
+   // Latência: 0 baixa, 1 normal, 2 segura (mais folga contra falhas). Reabre a saída.
++  // Quantas rajadas de folga: rajadas grandes (USB e placas externas costumam usar 20 ms) já trazem folga
++  // própria, então pedem menos rajadas — a controladora responde mais rápido. Se falhar, a folga cresce sozinha.
++  int burstsFor(int burstFrames, int rate) const {
++    const double ms = rate > 0 ? 1000.0 * burstFrames / rate : 0.0;
++    if (latencyMode_ == 0) return ms >= 15.0 ? 1 : 2;
++    if (latencyMode_ == 1) return ms >= 8.0 ? 2 : 3;
++    return ms >= 15.0 ? 4 : 6;
++  }
++
+   void setLatencyMode(int m) {
+     std::lock_guard<std::mutex> lock(mutex_);
+     latencyMode_ = m < 0 ? 0 : (m > 2 ? 2 : m);
+     if (!wanted_) return;
+     // com o som aberto basta mudar o tamanho do buffer: sem cortar o áudio nem reabrir a placa
+     if (stream_) {
+-      const int bursts = latencyMode_ == 0 ? 2 : (latencyMode_ == 1 ? 3 : 6);
++      const int bursts = burstsFor(stream_->getFramesPerBurst(), stream_->getSampleRate());
+       auto r = stream_->setBufferSizeInFrames(std::min(stream_->getFramesPerBurst() * bursts, stream_->getBufferCapacityInFrames()));
+       if (r) { info_[2].store(stream_->getBufferSizeInFrames()); return; }
+     }
+@@ -284,7 +293,7 @@
+     if (mode == 1 && got < 2) mode = 0;
+     effMode_.store(mode, std::memory_order_relaxed);
+     // Folga inicial conforme a escolha de latência (2, 3 ou 6 rajadas); se houver falha, ela cresce sozinha.
+-    const int bursts = latencyMode_ == 0 ? 2 : (latencyMode_ == 1 ? 3 : 6);
++    const int bursts = burstsFor(stream->getFramesPerBurst(), stream->getSampleRate());
+     stream->setBufferSizeInFrames(std::min(stream->getFramesPerBurst() * bursts, stream->getBufferCapacityInFrames()));
+     cb_ = 0;
+     lastXrun_ = 0;
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/cpp/core/engine.cpp d/app/src/main/cpp/core/engine.cpp
+--- a/app/src/main/cpp/core/engine.cpp
++++ b/app/src/main/cpp/core/engine.cpp
+@@ -24,6 +24,8 @@
+   peakDecayPerFrame_ = 1.0f / (0.8f * static_cast<float>(sr_));
+   for (auto& a : sampSeq_) a.store(0);
+   scratchCoef_ = 1.0f - std::exp(-1.0f / (0.003f * static_cast<float>(sr_)));
++  scratchPosK_ = 1.0f / (0.010f * static_cast<float>(sr_));   // agulha alcança o disco em ~10 ms
++  nudgeCoef_ = 1.0f - std::exp(-1.0f / (0.015f * static_cast<float>(sr_)));
+   for (int k = 0; k < kGrain; ++k) {
+     win_[k] = 0.5f * (1.f - std::cos(6.28318530717958648f * static_cast<float>(k) / static_cast<float>(kGrain)));
+   }
+@@ -162,6 +164,18 @@
+   send(c);
+ }
+ 
++void Engine::scratchMove(int deck, double frames) {
++  if (deck < 0 || deck >= kDecks || !(frames == frames) || std::fabs(frames) > 1e7) return;
++  Cmd c; c.type = CmdType::ScratchMove; c.deck = static_cast<uint8_t>(deck); c.d[0] = frames;
++  send(c);
++}
++
++void Engine::nudge(int deck, double frames) {
++  if (deck < 0 || deck >= kDecks || !(frames == frames) || std::fabs(frames) > 1e7) return;
++  Cmd c; c.type = CmdType::Nudge; c.deck = static_cast<uint8_t>(deck); c.d[0] = frames;
++  send(c);
++}
++
+ void Engine::setHeadphoneCue(int deck, bool on) {
+   if (deck < 0 || deck >= kDecks) return;
+   Cmd c; c.type = CmdType::HpCue; c.deck = static_cast<uint8_t>(deck); c.i = on ? 1 : 0;
+@@ -366,6 +380,8 @@
+         D.stemActive = false;
+         D.scratch = false;          // carregar outra música solta o prato (reverso, scratch)
+         D.scratchVel = 0.f;
++        D.scratchPos = false;
++        D.nudgeLeft = 0.0;
+         D.pos = 0;
+         D.cue = 0;
+         D.loopOn = false;
+@@ -452,12 +468,34 @@
+           }
+           D.scratch = true;
+           D.scratchVel = c.f;
++          D.scratchPos = false;
+         } else if (D.scratch) {
+           D.scratch = false;
++          D.scratchPos = false;
+           D.rateSm = D.scratchSm;  // a rampa de velocidade continua de onde a mão largou
+           D.stretchReset = true;
+         }
+         break;
++      case CmdType::ScratchMove:
++        if (!D.track) break;
++        if (!D.scratch || !D.scratchPos) {
++          if (!D.scratch) {
++            D.scratchSm = (D.wantPlay && D.playGain > 0.f) ? D.rateSm : 0.f;
++            D.scratchGain = 1.f;
++          }
++          D.scratch = true;
++          D.scratchPos = true;
++          D.scratchTarget = D.pos;
++        }
++        D.scratchTarget += c.d[0];
++        if (D.scratchTarget < 0.0) D.scratchTarget = 0.0;
++        if (D.scratchTarget > static_cast<double>(D.track->frames - 1)) D.scratchTarget = static_cast<double>(D.track->frames - 1);
++        break;
++      case CmdType::Nudge:
++        D.nudgeLeft += c.d[0];
++        if (D.nudgeLeft > sr_ * 2.0) D.nudgeLeft = sr_ * 2.0;
++        if (D.nudgeLeft < -sr_ * 2.0) D.nudgeLeft = -sr_ * 2.0;
++        break;
+       case CmdType::HpCue:
+         D.cueOn = c.i != 0;
+         break;
+@@ -740,9 +778,15 @@
+         D.pos = D.track ? static_cast<double>(std::min(D.pendingSeek, D.track->frames)) : 0.0;
+         D.pendingSeek = -1;
+         D.stretchReset = true;
++        D.scratchTarget = D.pos;
++        D.nudgeLeft = 0.0;
+       }
+ 
+       if (scr) {
++        if (D.scratchPos) {   // velocidade que leva a agulha até o ponto do disco em ~10 ms
++          float v = static_cast<float>((D.scratchTarget - D.pos) * scratchPosK_);
++          D.scratchVel = v < -12.f ? -12.f : (v > 12.f ? 12.f : v);
++        }
+         D.scratchSm += (D.scratchVel - D.scratchSm) * scratchCoef_;
+         const float ag = std::fabs(D.scratchSm) * 6.f;
+         D.scratchGain = ag > 1.f ? 1.f : ag;   // parado na mão = silêncio (nada de nível DC)
+@@ -771,7 +815,13 @@
+       float l = 0.f, r = 0.f;
+       if (D.track && D.playGain > 0.f) {
+         const int64_t frames = D.track->frames;
+-        const float step = scr ? D.scratchSm : D.rateSm;
++        float step = scr ? D.scratchSm : D.rateSm;
++        if (!scr && D.nudgeLeft != 0.0) {   // empurrão do prato: espalha o desvio em ~15 ms
++          const double part = D.nudgeLeft * nudgeCoef_;
++          D.nudgeLeft -= part;
++          if (std::fabs(D.nudgeLeft) < 0.01) D.nudgeLeft = 0.0;
++          step += static_cast<float>(part);
++        }
+         if (D.pos < 0.0) D.pos = 0.0;
+         if (D.pos < static_cast<double>(frames)) {
+           if ((D.keyLock || D.keyShift != 0.f) && !scr) {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/cpp/core/engine.h d/app/src/main/cpp/core/engine.h
+--- a/app/src/main/cpp/core/engine.h
++++ b/app/src/main/cpp/core/engine.h
+@@ -57,6 +57,13 @@
+   void clearLoop(int deck);
+   // Efeito do deck: type 0 desligado, 1 eco, 2 flanger, 3 reverb. amount 0..1. beatSeconds ajusta o eco à batida.
+   /** Efeito do deck em um dos 3 encaixes (slot 0..2), processados em série. */
++  /**
++   * Scratch por posição: o prato da controladora girou [frames] quadros da música (+ frente, - trás).
++   * A agulha segue o disco sem atraso de cálculo de velocidade e para exatamente quando a mão para.
++   */
++  void scratchMove(int deck, double frames);
++  /** Empurrão do prato com a música tocando: adianta (+) ou atrasa (-) [frames] quadros, suave (~15 ms). */
++  void nudge(int deck, double frames);
+   /** Curva do crossfader: 0 suave, 1 mixagem, 2 corte. */
+   void setCrossfaderCurve(int curve);
+   void setFx(int deck, int type, float amount, double beatSeconds, int slot = 0);
+@@ -117,7 +124,7 @@
+   void render(float* out, int frames, float* hp = nullptr);
+ 
+  private:
+-  enum class CmdType : uint8_t { Play, Pause, Cue, Seek, Volume, Crossfader, Master, Load, Rate, Eq, Filter, LoopOn, LoopOff, Fx, KeyLock, Scratch, HpCue, HpLevel, HpMix, PlaySynced, SampLoad, SampPlay, SampStop, SampVol, SampRate, StemGain, KeyShift, Trim, XfCurve };
++  enum class CmdType : uint8_t { Play, Pause, Cue, Seek, Volume, Crossfader, Master, Load, Rate, Eq, Filter, LoopOn, LoopOff, Fx, KeyLock, Scratch, HpCue, HpLevel, HpMix, PlaySynced, SampLoad, SampPlay, SampStop, SampVol, SampRate, StemGain, KeyShift, Trim, XfCurve, ScratchMove, Nudge };
+   struct Cmd {
+     CmdType type = CmdType::Play;
+     uint8_t deck = 0;
+@@ -155,6 +162,11 @@
+     bool loopOn = false;
+     int64_t loopStart = 0, loopEnd = 0;
+     DeckFx fx[3];
++    // scratch por posição (jog de controladora): a agulha persegue o ponto para onde a mão levou o disco
++    bool scratchPos = false;
++    double scratchTarget = 0;
++    // empurrão do prato (ajuste fino): quadros a avançar (+) ou atrasar (-), distribuídos em ~15 ms
++    double nudgeLeft = 0;
+     // key-lock
+     bool keyLock = false;
+     bool stretchReset = true;
+@@ -228,6 +240,7 @@
+   DeckAudio d_[kDecks];
+   float xTarget_ = 0.5f, xSm_ = 0.5f;
+   float xCached_ = -1.f, xgC_[2] = {0.f, 0.f};
++  float scratchPosK_ = 0.f, nudgeCoef_ = 0.f;
+   int xCurve_ = 0;  // 0 suave (potência constante), 1 mixagem (cheio no meio), 2 corte (scratch)
+   float masterTarget_ = 0.9f, masterSm_ = 0.9f;
+   float masterPeakLocal_ = 0.f;
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/cpp/native_bridge.cpp d/app/src/main/cpp/native_bridge.cpp
+--- a/app/src/main/cpp/native_bridge.cpp
++++ b/app/src/main/cpp/native_bridge.cpp
+@@ -181,6 +181,10 @@
+ JNI(void, nativeSetMaster)(JNIEnv*, jclass, jfloat v) { engine().setMaster(v); }
+ JNI(void, nativeSetRate)(JNIEnv*, jclass, jint deck, jfloat rate) { engine().setRate(deck, rate); }
+ JNI(void, nativeSetEq)(JNIEnv*, jclass, jint deck, jint band, jfloat v) { engine().setEq(deck, band, v); }
++JNI(void, nativeScratchMove)(JNIEnv*, jclass, jint deck, jdouble frames) { engine().scratchMove(deck, frames); }
++
++JNI(void, nativeNudge)(JNIEnv*, jclass, jint deck, jdouble frames) { engine().nudge(deck, frames); }
++
+ JNI(void, nativeSetCrossfaderCurve)(JNIEnv*, jclass, jint curve) { engine().setCrossfaderCurve(curve); }
+ 
+ JNI(void, nativeSetFx)(JNIEnv*, jclass, jint deck, jint type, jfloat amount, jfloat beatSeconds) {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/java/app/djfusion/audio/NativeEngine.kt d/app/src/main/java/app/djfusion/audio/NativeEngine.kt
+--- a/app/src/main/java/app/djfusion/audio/NativeEngine.kt
++++ b/app/src/main/java/app/djfusion/audio/NativeEngine.kt
+@@ -68,6 +68,10 @@
+     /** [type] = efeito + 16 × encaixe (0..2): até 3 efeitos ao mesmo tempo por deck. */
+     @JvmStatic external fun nativeSetFx(deck: Int, type: Int, amount: Float, beatSeconds: Float)
+     @JvmStatic external fun nativeSetCrossfaderCurve(curve: Int)
++    /** Scratch por posição: o prato da controladora girou [frames] quadros (+ frente, - trás). */
++    @JvmStatic external fun nativeScratchMove(deck: Int, frames: Double)
++    /** Empurrão do prato com a música tocando: adianta (+) ou atrasa (-) [frames] quadros. */
++    @JvmStatic external fun nativeNudge(deck: Int, frames: Double)
+     @JvmStatic external fun nativeSetLoop(deck: Int, start: Long, end: Long)
+     @JvmStatic external fun nativeClearLoop(deck: Int)
+     /** out = [bpm (0 = não detectado), primeira batida em quadros, confiança 0 a 1]. */
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/java/app/djfusion/midi/MidiCore.kt d/app/src/main/java/app/djfusion/midi/MidiCore.kt
+--- a/app/src/main/java/app/djfusion/midi/MidiCore.kt
++++ b/app/src/main/java/app/djfusion/midi/MidiCore.kt
+@@ -55,6 +55,18 @@
+             add(MidiTarget("d$d.keymatch", "TOM automático do deck $n", false))
+             add(MidiTarget("d$d.jumpf", "Pulo +4 batidas do deck $n", false))
+             add(MidiTarget("d$d.jumpb", "Pulo -4 batidas do deck $n", false))
++            add(MidiTarget("d$d.search", "BUSCA do deck $n (segure: o prato corre a música rápido)", false, hold = true))
++            add(MidiTarget("d$d.bendup", "Empurrar o deck $n para frente (segure)", false, hold = true))
++            add(MidiTarget("d$d.benddown", "Segurar o deck $n para trás (segure)", false, hold = true))
++            add(MidiTarget("d$d.pitchreset", "Pitch do deck $n de volta a 0%", false))
++            add(MidiTarget("d$d.loophalf", "Loop pela metade (½) no deck $n", false))
++            add(MidiTarget("d$d.loopdouble", "Loop em dobro (×2) no deck $n", false))
++            for (s in 5..8) add(MidiTarget("d$d.hot$s", "Hot cue $s do deck $n", false))
++            add(MidiTarget("d$d.fxslot", "Trocar o encaixe de efeito (FX1/FX2/FX3) do deck $n", false))
++            add(MidiTarget("d$d.fxoff", "Desligar os efeitos do deck $n", false))
++            add(MidiTarget("d$d.cuesauto", "Cues automáticas no deck $n", false))
++            add(MidiTarget("d$d.echoout", "ECHO OUT do deck $n", false))
++            add(MidiTarget("d$d.brake", "FREIO do deck $n", false))
+         }
+         add(MidiTarget("xfade", "Crossfader", true))
+         add(MidiTarget("master", "Volume master", true))
+@@ -139,6 +151,11 @@
+         byTarget[target] = key
+     }
+     fun clear(target: String) { byTarget.remove(target); rel.remove(target) }
++    /** Tira esta chave MIDI de qualquer controle. */
++    fun clearKey(key: Int) {
++        val t = byTarget.entries.filter { it.value == key }.map { it.key }
++        for (x in t) { byTarget.remove(x); rel.remove(x) }
++    }
+     fun clearAll() { byTarget.clear(); rel.clear() }
+     fun count(): Int = byTarget.size
+ 
+@@ -185,7 +202,7 @@
+ object Dj2go2Touch {
+     const val TICKS_PER_REV = 236
+     /** Versão do mapa de fábrica: subir quando mudar, para reaplicar sozinho em quem tem o antigo. */
+-    const val MAP_VERSION = 2
++    const val MAP_VERSION = 3
+     /** Mensagem que a DJ2GO2 espera ao conectar (pede o estado atual dos controles), igual à do Mixxx. */
+     val INIT_SYSEX = byteArrayOf(0xF0.toByte(), 0x00, 0x01, 0x3F, 0x3C, 0x48, 0xF7.toByte())
+     fun note(ch: Int, n: Int) = (0x90 shl 16) or (ch shl 8) or n
+@@ -229,7 +246,11 @@
+         add(Triple("browsepush", note(15, 0x06), null))
+     }
+ 
++    /** Notas que a DJ2GO2 manda sozinha ao trocar o modo dos pads (força baixa, canais 5 e 6): nunca são botões. */
++    val STATUS_KEYS = listOf(note(4, 0x00), note(5, 0x00))
++
+     fun applyTo(map: MidiMap) {
++        for (k in STATUS_KEYS) map.clearKey(k)
+         for ((target, key, mode) in entries) {
+             map.assign(target, key)
+             if (mode != null) map.setRel(target, mode)
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/java/app/djfusion/midi/MidiHub.kt d/app/src/main/java/app/djfusion/midi/MidiHub.kt
+--- a/app/src/main/java/app/djfusion/midi/MidiHub.kt
++++ b/app/src/main/java/app/djfusion/midi/MidiHub.kt
+@@ -60,6 +60,7 @@
+     }
+ 
+     fun start() {
++        rebuildFast()
+         val m = manager ?: return
+         m.registerDeviceCallback(callback, main)
+         for (info in m.devices) openDevice(info)
+@@ -110,7 +111,8 @@
+             note("conectada: ${name(info)} (entradas ${info.inputPortCount}, saídas ${info.outputPortCount})")
+             val port = device.openOutputPort(0)
+             if (port != null) {
+-                val parser = MidiParser { msg -> main.post { handle(msg) } }
++                // prato (jog) e toque no prato: tratados aqui mesmo, na linha do MIDI, sem esperar a tela
++                val parser = MidiParser { msg -> if (!fastPath(msg)) main.post { handle(msg) } }
+                 port.connect(object : MidiReceiver() {
+                     override fun onSend(msg: ByteArray, offset: Int, count: Int, timestamp: Long) {
+                         parser.feed(msg, offset, count)
+@@ -156,7 +158,88 @@
+         for (p in outPorts.values) runCatching { p.send(msg, 0, 3) }
+     }
+ 
+-    private val injectParser = MidiParser { msg -> handle(msg) }
++    private val injectParser = MidiParser { msg -> if (!fastPath(msg)) handle(msg) }
++
++    // ------------------------------------------------------- caminho rápido do prato (sem atraso)
++
++    /** Chave MIDI -> controle, só para prato e toque no prato (lido na linha do MIDI). */
++    @Volatile private var fast: Map<Int, String> = emptyMap()
++    /** Codificação de cada prato (0 complemento de dois, 1 centrado em 64, 3 sinal e magnitude, 4 absoluto). */
++    @Volatile private var fastRel: Map<String, Int> = emptyMap()
++    private val lastAbs = java.util.concurrent.ConcurrentHashMap<Int, Int>()
++    @Volatile private var lastFastLog = 0L
++
++    private fun rebuildFast() {
++        val f = HashMap<Int, String>()
++        val r = HashMap<String, Int>()
++        for (d in 0..1) for (id in listOf("d$d.jog", "d$d.jogtouch")) {
++            map.keyOf(id)?.let { f[it] = id }
++            r[id] = map.relMode(id)
++        }
++        fast = f
++        fastRel = r
++    }
++
++    /** Passos de um giro conforme a codificação da controladora. */
++    private fun relDelta(mode: Int, msg: MidiMsg): Int {
++        val v = msg.value
++        return when (mode) {
++            1 -> v - 64                                  // centrado em 64 (65 = +1, 63 = -1)
++            3 -> if (v >= 64) -(v - 64) else v           // sinal e magnitude (65 = -1)
++            4 -> {                                       // absoluto 0..127 que dá a volta
++                val last = lastAbs.put(msg.key, v)
++                if (last == null) 0 else { var d = v - last; if (d > 64) d -= 128; if (d < -64) d += 128; d }
++            }
++            else -> if (v < 64) v else v - 128          // complemento de dois (127 = -1)
++        }
++    }
++
++    private fun fastPath(msg: MidiMsg): Boolean {
++        if (_learning.value != null) return false
++        val id = fast[msg.key] ?: return false
++        if (id.endsWith(".jog")) {
++            if (msg.type != 0xB0) return false
++            val delta = relDelta(fastRel[id] ?: 0, msg)
++            if (delta != 0) onControl(id, delta.toFloat())
++        } else {
++            onControl(id, if (msg.pressed) 1f else 0f)
++        }
++        // monitor e relatório: no máximo 10 vezes por segundo para o giro
++        val now = android.os.SystemClock.uptimeMillis()
++        if (!id.endsWith(".jog") || now - lastFastLog > 100) {
++            lastFastLog = now
++            main.post { logOnly(msg, id) }
++        }
++        return true
++    }
++
++    private fun logOnly(msg: MidiMsg, id: String) {
++        val line = msg.describe()
++        val cur = _log.value
++        _log.value = if (msg.key == lastLogKey && cur.isNotEmpty()) listOf(line) + cur.drop(1) else (listOf(line) + cur).take(14)
++        lastLogKey = msg.key
++        if (msg.type != 0xB0 || msg.key != lastDiagKey) note("%s -> %s".format(msg.describe(), MidiTargets.get(id)?.label ?: id))
++        lastDiagKey = msg.key
++        _lastAction.value = MidiTargets.get(id)?.label ?: id
++    }
++
++    // ------------------------------------------------------- mensagens de estado (não são botões)
++
++    /**
++     * Algumas controladoras mandam a mesma nota, com força baixa e sem soltar, em dois canais ao mesmo tempo
++     * para avisar troca de modo (a DJ2GO2 faz isso na nota 0 dos canais 5 e 6). Isso não é um botão:
++     * notas fracas esperam 15 ms e, se a gêmea chegar noutro canal, as duas são ignoradas.
++     */
++    private var pendingLow: Pair<MidiMsg, Runnable>? = null
++
++    private fun isStatusTwin(msg: MidiMsg): Boolean {
++        val p = pendingLow ?: return false
++        if (p.first.number != msg.number || p.first.channel == msg.channel) return false
++        main.removeCallbacks(p.second)
++        pendingLow = null
++        note("ignorada (aviso de modo da controladora): ${p.first.describe()} + canal ${msg.channel + 1}")
++        return true
++    }
+     /** Processa bytes MIDI como se viessem da controladora (usado no teste automático, sem aparelho). */
+     fun inject(bytes: ByteArray) = injectParser.feed(bytes, 0, bytes.size)
+ 
+@@ -164,6 +247,18 @@
+     fun resetLeds() = ledState.clear()
+ 
+     private fun handle(msg: MidiMsg) {
++        if (msg.type == 0x90 && msg.value in 1..15) {
++            if (isStatusTwin(msg)) return
++            pendingLow?.let { (m, r) -> main.removeCallbacks(r); pendingLow = null; process(m) }
++            val r = Runnable { pendingLow = null; process(msg) }
++            pendingLow = msg to r
++            main.postDelayed(r, 15)
++            return
++        }
++        process(msg)
++    }
++
++    private fun process(msg: MidiMsg) {
+         // monitor: agrupa giros seguidos do mesmo controle numa linha só
+         val line = msg.describe()
+         val cur = _log.value
+@@ -178,7 +273,8 @@
+                 val ok = when {
+                     t.relative -> msg.type == 0xB0      // jog: só controle (CC) que gira
+                     t.continuous -> msg.type != 0x90 || msg.value > 0
+-                    else -> msg.pressed
++                    // botão: aperto de verdade (força baixa costuma ser aviso da controladora, não um dedo)
++                    else -> msg.pressed && !(msg.type == 0x90 && msg.value < 16)
+                 }
+                 if (ok) {
+                     map.assign(learn, msg.key)
+@@ -201,7 +297,7 @@
+         val t = MidiTargets.get(id) ?: return
+         when {
+             t.relative -> if (msg.type == 0xB0) {
+-                val delta = if (map.relMode(id) == 1) msg.value - 64 else (if (msg.value < 64) msg.value else msg.value - 128)
++                val delta = relDelta(map.relMode(id), msg)
+                 if (delta != 0) onControl(id, delta.toFloat())
+             }
+             t.hold -> onControl(id, if (msg.pressed) 1f else 0f)
+@@ -254,7 +350,20 @@
+     private fun snapshot(): Map<String, Int> =
+         MidiTargets.all.mapNotNull { t -> map.keyOf(t.id)?.let { t.id to it } }.toMap()
+ 
++    /** Codificação do prato de cada deck: 0 complemento de dois, 1 centrado em 64, 3 sinal e magnitude, 4 absoluto. */
++    private val _jogModes = MutableStateFlow(listOf(0, 1).map { map.relMode("d$it.jog") })
++    val jogModes: StateFlow<List<Int>> = _jogModes.asStateFlow()
++    fun setJogMode(deck: Int, mode: Int) {
++        val id = "d$deck.jog"
++        if (map.keyOf(id) == null) return
++        map.setRel(id, mode)
++        lastAbs.clear()
++        save()
++    }
++
+     private fun save() {
++        rebuildFast()
++        _jogModes.value = listOf(0, 1).map { map.relMode("d$it.jog") }
+         prefs.edit().putString("map", map.serialize()).apply()
+         _mapped.value = snapshot()
+         _tempoInv.value = invSet()
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/java/app/djfusion/ui/AppViewModel.kt d/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+--- a/app/src/main/java/app/djfusion/ui/AppViewModel.kt
++++ b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+@@ -281,7 +281,18 @@
+                 4 -> censor(deck)
+                 else -> matchKey(deck)
+             }
+-            k.matches(Regex("hot[1-4]")) -> hotcue(deck, k.substring(3).toInt() - 1)
++            k.matches(Regex("hot[1-8]")) -> hotcue(deck, k.substring(3).toInt() - 1)
++            k == "search" -> jog.setSearch(deck, v > 0.5f)
++            k == "bendup" -> pitchBend(deck, 1, v > 0.5f)
++            k == "benddown" -> pitchBend(deck, -1, v > 0.5f)
++            k == "pitchreset" -> resetPitch(deck)
++            k == "loophalf" -> loopResize(deck, 0.5)
++            k == "loopdouble" -> loopResize(deck, 2.0)
++            k == "fxslot" -> setFxSlot(deck, (_decks.value[deck].fxSel + 1) % 3)
++            k == "fxoff" -> clearFx(deck)
++            k == "cuesauto" -> prepareCues(deck)
++            k == "echoout" -> echoOut(deck)
++            k == "brake" -> brake(deck)
+             k.matches(Regex("loop[1248]")) -> toggleLoop(deck, k.substring(4).toInt())
+             k == "stemv" -> toggleStem(deck, 0)
+             k == "stemd" -> toggleStem(deck, 1)
+@@ -951,6 +962,55 @@
+     }
+ 
+     /** Prato tocado: [velocity] em múltiplos da velocidade normal. */
++    /** O prato da controladora pegou o disco (SLIP começa a contar). */
++    fun jogScratchBegin(deck: Int) = slipBegin(deck)
++
++    /** O prato da controladora soltou o disco. */
++    fun jogScratchEnd(deck: Int) {
++        NativeEngine.nativeScratch(deck, false, 0f)
++        slipEnd(deck)
++    }
++
++    /**
++     * Prato da tela por posição: [revs] voltas giradas (+ frente). No meio do disco é scratch exato;
++     * na borda com a música tocando ([rim]) empurra/segura a batida.
++     */
++    fun platterMove(deck: Int, revs: Float, rim: Boolean) {
++        val d = _decks.value[deck]
++        if (!d.loaded || d.loading) return
++        if (rim) { NativeEngine.nativeNudge(deck, revs * 0.3 * NativeEngine.SAMPLE_RATE * jog.bendGain); return }
++        if (revs == 0f) slipBegin(deck)
++        NativeEngine.nativeScratchMove(deck, revs * 1.8 * NativeEngine.SAMPLE_RATE)
++    }
++
++    /** Empurra (+) ou segura (-) a música [frames] quadros com ela tocando (arrastar a onda, jog). */
++    fun nudge(deck: Int, frames: Double) = NativeEngine.nativeNudge(deck, frames)
++
++    /** Arrastar a onda com a música parada: anda [frames] quadros (procura o ponto exato). */
++    fun scrubBy(deck: Int, frames: Long) {
++        val d = _decks.value[deck]
++        if (!d.loaded || d.loading) return
++        NativeEngine.nativeSeek(deck, (posOf(deck) + frames).coerceIn(0L, (d.lengthFrames - 1).coerceAtLeast(0L)))
++    }
++
++    /** Loop pela metade ou em dobro, mantendo o início (½ e ×2). */
++    fun loopResize(deck: Int, factor: Double) {
++        val d = _decks.value[deck]
++        val reg = _loopRegion.value[deck]
++        if (!d.hasBpm || reg == null || d.loopBeats <= 0) { say("Ligue um loop primeiro."); return }
++        val beat = 60.0 * NativeEngine.SAMPLE_RATE / d.bpm
++        val nb = (d.loopBeats * factor)
++        if (nb < 0.25 || nb > 32) return
++        val end = reg.first + nb * beat
++        if (end > d.lengthFrames) { say("Perto demais do fim para dobrar o loop."); return }
++        if (nb < 1.0) {   // menos de 1 batida vira loop fracionado (ROLL); aqui fica no mínimo 1
++            return
++        }
++        setLoopNative(deck, reg.first, end.toLong())
++        setDeck(deck) { it.copy(loopBeats = nb.toInt()) }
++        say("Loop de ${nb.toInt()} batida(s) no deck ${deckName(deck)}.")
++    }
++
+     fun scratch(deck: Int, active: Boolean, velocity: Float) {
+         if (active && slipFrom[deck] == null) slipBegin(deck)
+         NativeEngine.nativeScratch(deck, active, velocity)
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/java/app/djfusion/ui/Components.kt d/app/src/main/java/app/djfusion/ui/Components.kt
+--- a/app/src/main/java/app/djfusion/ui/Components.kt
++++ b/app/src/main/java/app/djfusion/ui/Components.kt
+@@ -488,8 +488,19 @@
+     modifier: Modifier = Modifier,
+     viewSeconds: Float = VIEW_SECONDS.toFloat(),
+     cueNames: List<String> = emptyList(),
++    /** Batidas do OUTRO deck projetadas nesta onda (para casar as batidas só de olho), ou null. */
++    ghost: (() -> GhostBeats?)? = null,
++    /** Loop ativo (início, fim em quadros) ou null. */
++    loop: Pair<Long, Long>? = null,
+ ) {
+     val paints = remember { specPaints() }
++    val infoPaint = remember {
++        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
++            color = android.graphics.Color.WHITE
++            typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
++            textAlign = android.graphics.Paint.Align.RIGHT
++        }
++    }
+     val tagPaint = remember {
+         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+             color = android.graphics.Color.rgb(20, 23, 27)
+@@ -580,6 +591,42 @@
+                 k++
+             }
+         }
++        // loop ativo: faixa sombreada com bordas
++        if (loop != null && loop.second > loop.first) {
++            val x0 = ((loop.first - pos) / perPx + w / 2f).toFloat()
++            val x1 = ((loop.second - pos) / perPx + w / 2f).toFloat()
++            if (x1 > 0f && x0 < w) {
++                drawRect(Color(0x3334C759), Offset(x0, 0f), Size(x1 - x0, h))
++                drawLine(Color(0xFF34C759), Offset(x0, 0f), Offset(x0, h), 2.dp.toPx())
++                drawLine(Color(0xFF34C759), Offset(x1, 0f), Offset(x1, h), 2.dp.toPx())
++            }
++        }
++        // batidas do outro deck (triângulos embaixo): quando caem em cima das linhas desta onda, as batidas estão casadas
++        val g = ghost?.invoke()
++        if (g != null && g.periodFrames > 100.0) {
++            val gh = 7.dp.toPx()
++            var k = Math.floor((-span / 2 - g.nextFrames) / g.periodFrames).toLong()
++            while (true) {
++                val off = g.nextFrames + k * g.periodFrames
++                if (off > span / 2) break
++                val x = (off / perPx + w / 2f).toFloat()
++                val big = (g.nextIndex + k).mod(4L) == 0L
++                val hh = if (big) gh * 1.5f else gh
++                val t = Path().apply { moveTo(x, h - hh); lineTo(x - hh * 0.6f, h); lineTo(x + hh * 0.6f, h); close() }
++                drawPath(t, g.color.copy(alpha = if (big) 1f else 0.75f))
++                k++
++            }
++        }
++        // contador: compasso.batida e quantas batidas faltam para a próxima frase (16)
++        if (bpm > 0.0 && pos >= firstBeatFrame) {
++            val beatF = 48000.0 * 60.0 / bpm
++            val idx = Math.floor((pos - firstBeatFrame) / beatF).toLong()
++            val toPhrase = 16 - idx.mod(16L).toInt()
++            infoPaint.textSize = 10.dp.toPx()
++            val txt = "${idx / 4 + 1}.${idx.mod(4L) + 1}  FRASE em $toPhrase"
++            infoPaint.color = if (toPhrase <= 4) android.graphics.Color.rgb(255, 209, 102) else android.graphics.Color.argb(220, 255, 255, 255)
++            drawContext.canvas.nativeCanvas.drawText(txt, w - 4.dp.toPx(), h - 4.dp.toPx(), infoPaint)
++        }
+         // marcas: hot cues e cue
+         val padCols = HOT_COLORS
+         for (slot in hotcues.indices) {
+@@ -616,6 +663,12 @@
+     }
+ }
+ 
++/**
++ * Batidas do outro deck vistas nesta onda: [periodFrames] e [nextFrames] já em quadros DESTA onda
++ * (distância entre batidas e até a próxima batida do outro), [nextIndex] = número da próxima batida (para o 1 do compasso).
++ */
++data class GhostBeats(val periodFrames: Double, val nextFrames: Double, val nextIndex: Long, val color: Color)
++
+ internal val HOT_COLORS = listOf(
+     Color(0xFFFF5A5F), Color(0xFFFF9F43), Color(0xFFFFD166), Color(0xFF4CD08A),
+     Color(0xFF2ED1C4), Color(0xFF4F8BFF), Color(0xFFB57BFF), Color(0xFFFF6FD8),
+@@ -659,6 +712,7 @@
+         val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
+         val heightPx = with(LocalDensity.current) { maxHeight.roundToPx() }
+         val lines = remember(peaks, widthPx, heightPx) { overviewLines(peaks, widthPx, heightPx) }
++        val lane = remember(peaks, widthPx) { bassLane(peaks, widthPx) }
+         Canvas(Modifier.fillMaxSize()) {
+             val w = size.width
+             val h = size.height
+@@ -688,11 +742,41 @@
+                     drawRect(c, Offset(x - 1f, 0f), Size(6.dp.toPx(), 4.dp.toPx()))
+                 }
+             }
++            // faixa embaixo: verde onde a batida (graves) está cheia, cinza nos breaks — dá para ver as partes sem ouvir
++            if (lane.isNotEmpty()) {
++                val lh = 3.dp.toPx()
++                var x0 = 0
++                while (x0 < lane.size) {
++                    var x1 = x0
++                    while (x1 + 1 < lane.size && lane[x1 + 1] == lane[x0]) x1++
++                    val c = when (lane[x0].toInt()) { 2 -> Color(0xFF34C759); 1 -> Color(0xFFFFB020); else -> Color(0xFF3A4048) }
++                    drawRect(c, Offset(x0 * w / lane.size, h - lh), Size((x1 - x0 + 1) * w / lane.size, lh))
++                    x0 = x1 + 1
++                }
++            }
+             drawLine(Color.White, Offset(playedX, 0f), Offset(playedX, h), 2.dp.toPx())
+         }
+     }
+ }
+ 
++/** Por coluna da visão geral: 2 = batida cheia, 1 = graves fracos, 0 = break/sem graves. */
++private fun bassLane(peaks: ByteArray?, width: Int): ByteArray {
++    if (peaks == null || width <= 0) return ByteArray(0)
++    val bins = peaks.size / 3
++    if (bins < width) return ByteArray(0)
++    val avg = FloatArray(width)
++    for (x in 0 until width) {
++        val from = (x.toLong() * bins / width).toInt()
++        val to = max(from + 1, ((x + 1).toLong() * bins / width).toInt()).coerceAtMost(bins)
++        var sum = 0f
++        for (b in from until to) sum += (peaks[b * 3].toInt() and 0xFF)
++        avg[x] = sum / (to - from)
++    }
++    val ref = avg.filter { it > 4f }.sorted().let { if (it.isEmpty()) 0f else it[(it.size * 0.6f).toInt().coerceAtMost(it.size - 1)] }
++    if (ref <= 0f) return ByteArray(0)
++    return ByteArray(width) { x -> (when { avg[x] >= ref * 0.6f -> 2; avg[x] >= ref * 0.3f -> 1; else -> 0 }).toByte() }
++}
++
+ /** Linhas da visão geral agrupadas pela cor do espectro: (cor, pontos). */
+ private fun overviewLines(peaks: ByteArray?, width: Int, height: Int): List<Pair<Int, FloatArray>> {
+     if (peaks == null || width <= 0) return emptyList()
+@@ -739,9 +823,15 @@
+     vinyl: () -> Boolean = { true },
+     playing: () -> Boolean = { false },
+     cue: () -> Long = { -1L },
++    /**
++     * Giro por posição (sem atraso): (voltas giradas desde o último evento, é a borda empurrando?).
++     * Quando presente, o scratch segue o dedo exatamente e [onScratch] só recebe o soltar.
++     */
++    onMove: ((Float, Boolean) -> Unit)? = null,
+     center: @Composable BoxScope.() -> Unit = {},
+ ) {
+     val scratchCb = rememberUpdatedState(onScratch)
++    val moveCb = rememberUpdatedState(onMove)
+     val bendCb = rememberUpdatedState(onBend)
+     var touched by remember { mutableStateOf(0) }     // 0 solto, 1 scratch, 2 empurrando
+     Box(
+@@ -762,12 +852,13 @@
+                 var lastAng = atan2(dy0, dx0)
+                 var lastT = down.uptimeMillis
+                 var vel = 0f
+-                cb?.invoke(true, 0f)
++                val mv = moveCb.value
++                if (mv != null) mv(0f, bend) else cb?.invoke(true, 0f)
+                 while (true) {
+                     val ev = withTimeoutOrNull(30L) { awaitPointerEvent() }
+                     if (ev == null) {                      // dedo parado: o disco fica preso na mão
+                         vel = 0f
+-                        cb?.invoke(true, 0f)
++                        if (mv == null) cb?.invoke(true, 0f)
+                         continue
+                     }
+                     val ch = ev.changes.firstOrNull() ?: break
+@@ -780,8 +871,13 @@
+                         if (d > PI.toFloat()) d -= 2f * PI.toFloat()
+                         if (d < -PI.toFloat()) d += 2f * PI.toFloat()
+                         val dt = (ch.uptimeMillis - lastT) / 1000f
+-                        // eventos com o mesmo horário (telas de alta taxa): acumula o ângulo até o tempo andar
+-                        if (dt > 0.001f) {
++                        if (mv != null) {
++                            // por posição: o disco anda exatamente o ângulo que o dedo girou
++                            mv(d / (2f * PI.toFloat()), bend)
++                            lastAng = ang
++                            lastT = ch.uptimeMillis
++                        } else if (dt > 0.001f) {
++                            // eventos com o mesmo horário (telas de alta taxa): acumula o ângulo até o tempo andar
+                             // uma volta do prato = 1,8 s de música (33⅓ rpm)
+                             val v = (d / (2f * PI.toFloat())) * 1.8f / dt
+                             vel = 0.5f * vel + 0.5f * v.coerceIn(-8f, 8f)
+@@ -792,7 +888,7 @@
+                     }
+                     ch.consume()
+                 }
+-                cb?.invoke(false, 0f)
++                if (mv == null || !bend) cb?.invoke(false, 0f)
+                 touched = 0
+             }
+         },
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt d/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
+@@ -111,8 +111,19 @@
+                 cue = { live.value.decks[deck].cueFrames },
+                 deckColor = color,
+                 viewSeconds = zoomSec,
++                ghost = { ghostBeats(vm, deck, live) },
++                loop = loopRegion,
+                 modifier = Modifier.fillMaxSize()
+-                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { vm.cycleWaveZoom() }) },
++                    .semantics { contentDescription = "Onda do deck $name: arraste para procurar (parado) ou empurrar a batida (tocando); toque duplo muda o zoom" }
++                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { vm.cycleWaveZoom() }) }
++                    .pointerInput(deck, zoomSec) {
++                        // arrastar a onda: parado procura o ponto exato; tocando empurra/segura a batida (como no Serato)
++                        androidx.compose.foundation.gestures.detectHorizontalDragGestures { change, dx ->
++                            change.consume()
++                            val frames = -dx * 48000.0 * zoomSec / size.width
++                            if (vm.decks.value[deck].playing) vm.nudge(deck, frames * 0.25) else vm.scrubBy(deck, frames.toLong())
++                        }
++                    },
+             )
+             Row(
+                 Modifier.align(Alignment.TopStart).padding(4.dp),
+@@ -139,6 +150,12 @@
+                     TopChip(if (q) "Q ✓" else "Q", q, "Quantize: cues e loops presos na batida (ligado: $q)") { vm.toggleQuantize() }
+                     val vin by vm.vinyl.collectAsStateWithLifecycle()
+                     TopChip("VINIL", vin, "Modo vinil (ligado: $vin): tocar no disco faz scratch") { vm.toggleVinyl() }
++                    val srch by vm.jog.search.collectAsStateWithLifecycle()
++                    val searchOn = srch.any { it }
++                    TopChip("BUSCA", searchOn, "Modo BUSCA dos pratos da controladora (ligado: $searchOn): girar corre a música rápido, sem som") {
++                        vm.jog.setSearch(0, !searchOn); vm.jog.setSearch(1, !searchOn)
++                        vm.say(if (!searchOn) "BUSCA ligada: o prato da controladora corre a música 20 vezes mais rápido." else "BUSCA desligada: o prato volta ao normal.")
++                    }
+                 }
+                 val overlay = when {
+                     ui.loading -> "Carregando… ${(ui.loadProgress * 100).toInt()}%"
+@@ -171,6 +188,27 @@
+     }
+ }
+ 
++/** Batidas do outro deck projetadas na onda deste (só com os dois andamentos e o outro tocando). */
++internal fun ghostBeats(vm: AppViewModel, deck: Int, live: State<LiveUi>): GhostBeats? {
++    val all = vm.decks.value
++    val me = all[deck]
++    val ot = all[1 - deck]
++    if (!me.loaded || !me.hasBpm || !ot.loaded || !ot.hasBpm || !ot.playing) return null
++    val beat2 = 48000.0 * 60.0 / ot.bpm
++    val p2 = live.value.decks[1 - deck].positionFrames
++    if (p2 < ot.firstBeatFrame) return null
++    val rel = (p2 - ot.firstBeatFrame) / beat2
++    val idx = Math.floor(rel).toLong()
++    val myPerSec = 48000.0 * me.rate
++    val otPerSec = 48000.0 * ot.rate
++    return GhostBeats(
++        periodFrames = beat2 / otPerSec * myPerSec,
++        nextFrames = (idx + 1 - rel) * beat2 / otPerSec * myPerSec,
++        nextIndex = idx + 1,
++        color = deckColor(1 - deck),
++    )
++}
++
+ @Composable
+ private fun RemainingText(live: State<LiveUi>, deck: Int, length: Long, modifier: Modifier) {
+     val pos = live.value.decks[deck].positionFrames
+@@ -422,6 +460,7 @@
+                 onScratch = scratchCb,
+                 onBend = if (ready) ({ active: Boolean, vel: Float -> vm.jogBend(deck, active, vel) }) else null,
+                 vinyl = { vm.vinyl.value },
++                onMove = if (ready) ({ r: Float, rim: Boolean -> vm.platterMove(deck, r, rim) }) else null,
+                 playing = { vm.decks.value[deck].playing },
+                 cue = { live.value.decks[deck].cueFrames },
+             ) {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/java/app/djfusion/ui/JogController.kt d/app/src/main/java/app/djfusion/ui/JogController.kt
+--- a/app/src/main/java/app/djfusion/ui/JogController.kt
++++ b/app/src/main/java/app/djfusion/ui/JogController.kt
+@@ -1,28 +1,32 @@
+ package app.djfusion.ui
+ 
+ import android.content.SharedPreferences
++import android.os.Handler
++import android.os.Looper
+ import app.djfusion.audio.NativeEngine
+ import kotlinx.coroutines.CoroutineScope
+-import kotlinx.coroutines.Job
+-import kotlinx.coroutines.delay
+-import kotlinx.coroutines.launch
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
+ 
+ /**
+- * Jog wheel de controladoras. A cada passo girado o app calcula a velocidade do giro:
+- * - com o dedo no prato (ou com o deck parado) vira scratch: a música anda para frente e para trás com a mão;
+- * - com o deck tocando e sem tocar no prato vira ajuste fino: girar para frente acelera um pouco, para trás freia.
+- * Quantos passos a controladora manda por volta varia por modelo, então é ajustável ([ticksPerRev]).
++ * Jog wheel de controladoras, sem atraso: cada passo girado vira deslocamento exato da música no motor
++ * (o motor leva a agulha até lá em ~10 ms), em vez de estimar velocidade pelo tempo entre mensagens.
++ * - dedo no prato (com VINIL) ou deck parado: scratch, a música vai e volta exatamente com a mão e para quando ela para;
++ * - tocando sem encostar (ou VINIL desligado): empurrão, adianta/atrasa a batida proporcional ao giro;
++ * - BUSCA: o prato corre a música 20 vezes mais rápido, sem som (achar um ponto numa música longa).
++ * Chamado direto da linha de MIDI (não espera a tela): só usa o motor e valores lidos de StateFlow.
+  */
+ class JogController(
+     private val prefs: SharedPreferences,
+     private val vm: AppViewModel,
+-    private val scope: CoroutineScope,
++    @Suppress("UNUSED_PARAMETER") scope: CoroutineScope,
+ ) {
+-    var ticksPerRev: Int = prefs.getInt("tpr", 128).coerceIn(32, 1024)
++    @Volatile var ticksPerRev: Int = prefs.getInt("tpr", 128).coerceIn(32, 4096)
+         private set
+ 
+-    /** Força do ajuste fino (girar a borda com a música tocando): 0,25 a 3 (1 = normal). */
+-    var bendGain: Float = prefs.getFloat("bend", 1f).coerceIn(0.25f, 3f)
++    /** Força do empurrão (girar a borda com a música tocando): 0,25 a 3 (1 = normal: uma volta = 0,3 s). */
++    @Volatile var bendGain: Float = prefs.getFloat("bend", 1f).coerceIn(0.25f, 3f)
+         private set
+ 
+     fun setBendGain(v: Float) {
+@@ -31,70 +35,115 @@
+     }
+ 
+     fun setTicksPerRev(v: Int) {
+-        ticksPerRev = v.coerceIn(32, 1024)
++        ticksPerRev = v.coerceIn(32, 4096)
+         prefs.edit().putInt("tpr", ticksPerRev).apply()
+     }
+ 
++    private val main = Handler(Looper.getMainLooper())
++
+     private class State {
+-        var touching = false
+-        var vel = 0f
+-        var lastNs = 0L
+-        var mode = 0               // 0 nada, 1 scratch, 2 ajuste fino
+-        var watchdog: Job? = null
++        @Volatile var touching = false
++        @Volatile var scratching = false
++        var releaser: Runnable? = null
+     }
+ 
+     private val st = arrayOf(State(), State())
+ 
+-    /** Passos girados (positivo = para frente). */
++    // ------------------------------------------------------------ BUSCA
++
++    private val _search = MutableStateFlow(listOf(false, false))
++    /** Modo BUSCA de cada deck: o prato corre a música rápido, sem som. */
++    val search: StateFlow<List<Boolean>> = _search.asStateFlow()
++    fun setSearch(deck: Int, on: Boolean) {
++        if (deck !in 0..1) return
++        _search.value = _search.value.mapIndexed { i, v -> if (i == deck) on else v }
++    }
++
++    // ------------------------------------------------------------ calibração (passos por volta)
++
++    @Volatile private var calibDeck = -1
++    @Volatile private var calibSum = 0
++    private val _calib = MutableStateFlow(-1)
++    /** Passos contados na calibração em andamento (-1 = sem calibração). */
++    val calibration: StateFlow<Int> = _calib.asStateFlow()
++    fun startCalibration(deck: Int) { calibSum = 0; calibDeck = deck; _calib.value = 0 }
++    fun cancelCalibration() { calibDeck = -1; _calib.value = -1 }
++    /** Termina a calibração: o total de passos de uma volta vira o novo valor. Retorna o valor ou -1. */
++    fun finishCalibration(): Int {
++        val n = calibSum
++        calibDeck = -1
++        _calib.value = -1
++        if (n < 32) return -1
++        setTicksPerRev(n)
++        return n
++    }
++
++    // ------------------------------------------------------------ giro e toque
++
++    /** Quadros da música por passo do prato (uma volta = 1,8 s, como um disco de 33⅓ rpm). */
++    private fun framesPerTick(): Double = NativeEngine.SAMPLE_RATE * 1.8 / ticksPerRev
++
++    /** Passos girados (positivo = para frente). Pode ser chamado de qualquer linha. */
+     fun tick(deck: Int, ticks: Int) {
+         if (deck !in 0..1 || ticks == 0) return
+-        val s = st[deck]
+-        val now = System.nanoTime()
+-        val dt = ((now - s.lastNs) / 1e9f).coerceIn(0.002f, 0.1f)
+-        s.lastNs = now
+-        // uma volta do prato = 1,8 s de música (33⅓ rpm)
+-        val inst = ticks * (1.8f / ticksPerRev) / dt
+-        s.vel = (0.55f * s.vel + 0.45f * inst).coerceIn(-8f, 8f)
++        if (calibDeck == deck) { calibSum += kotlin.math.abs(ticks); _calib.value = calibSum; return }
+         val d = vm.decks.value[deck]
+-        if (!d.loaded) return
+-        // VINIL ligado: dedo em cima do prato = scratch. Desligado: tocando, o prato só empurra/segura
+-        if ((s.touching && vm.vinyl.value) || !d.playing) {
+-            s.mode = 1
+-            vm.scratch(deck, true, s.vel)
+-        } else {
+-            s.mode = 2
+-            val bend = (s.vel * 0.12f * bendGain).coerceIn(-0.3f, 0.3f)
+-            NativeEngine.nativeSetRate(deck, d.rate * (1f + bend))
++        if (!d.loaded || d.loading) return
++        val s = st[deck]
++        val frames = ticks * framesPerTick()
++        when {
++            _search.value[deck] -> {
++                val buf = LongArray(4)
++                NativeEngine.nativeDeckState(deck, buf)
++                val target = (buf[1] + frames * 20).toLong().coerceIn(0L, (d.lengthFrames - 1).coerceAtLeast(0L))
++                NativeEngine.nativeSeek(deck, target)
++            }
++            (s.touching && vm.vinyl.value) || !d.playing -> {
++                if (!s.scratching) {
++                    s.scratching = true
++                    main.post { vm.jogScratchBegin(deck) }
++                }
++                NativeEngine.nativeScratchMove(deck, frames)
++                // controladora sem sensor de toque: solta o disco 120 ms depois do último passo
++                if (!s.touching) scheduleRelease(deck, 120)
++            }
++            else -> NativeEngine.nativeNudge(deck, frames * (0.3 / 1.8) * bendGain)
+         }
+-        s.watchdog?.cancel()
+-        s.watchdog = scope.launch {
+-            delay(90)
+-            s.vel = 0f
+-            when (s.mode) {
+-                1 -> if (s.touching) vm.scratch(deck, true, 0f) else vm.scratch(deck, false, 0f)
+-                2 -> NativeEngine.nativeSetRate(deck, vm.decks.value[deck].rate)
++    }
++
++    private fun scheduleRelease(deck: Int, ms: Long) {
++        val s = st[deck]
++        s.releaser?.let { main.removeCallbacks(it) }
++        val r = Runnable {
++            if (!s.touching && s.scratching) {
++                s.scratching = false
++                vm.jogScratchEnd(deck)
+             }
+-            if (!s.touching) s.mode = 0
+         }
++        s.releaser = r
++        main.postDelayed(r, ms)
+     }
+ 
+-    /** Dedo encostou (true) ou saiu (false) do prato. */
++    /** Dedo encostou (true) ou saiu (false) do prato. Pode ser chamado de qualquer linha. */
+     fun touch(deck: Int, on: Boolean) {
+         if (deck !in 0..1) return
+         val s = st[deck]
+         s.touching = on
+-        s.vel = 0f
+-        s.lastNs = System.nanoTime()
+         if (on) {
+             val d = vm.decks.value[deck]
+-            if (d.loaded && (vm.vinyl.value || !d.playing)) {
+-                s.mode = 1
+-                vm.scratch(deck, true, 0f)
++            if (d.loaded && !d.loading && !_search.value[deck] && (vm.vinyl.value || !d.playing)) {
++                // segura o disco: a agulha para onde está (como a mão num vinil)
++                if (!s.scratching) {
++                    s.scratching = true
++                    main.post { vm.jogScratchBegin(deck) }
++                }
++                NativeEngine.nativeScratchMove(deck, 0.0)
+             }
+-        } else if (s.mode == 1) {
+-            s.watchdog?.cancel()
+-            vm.scratch(deck, false, 0f)
+-            s.mode = 0
++        } else if (s.scratching) {
++            s.releaser?.let { main.removeCallbacks(it) }
++            s.scratching = false
++            main.post { vm.jogScratchEnd(deck) }
++            NativeEngine.nativeScratch(deck, false, 0f)
+         }
+     }
+ }
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/java/app/djfusion/ui/MidiScreen.kt d/app/src/main/java/app/djfusion/ui/MidiScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/MidiScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/MidiScreen.kt
+@@ -314,6 +314,44 @@
+                 Text("+", color = Metal.OnMetal, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.align(Alignment.Center))
+             }
+         }
+-        Text("Se o scratch ficar lento demais, diminua; se ficar rápido demais, aumente.", color = Metal.TextMuted, fontSize = 11.sp)
++        Text("Se o scratch ficar lento demais, diminua; se ficar rápido demais, aumente. Ou calibre:", color = Metal.TextMuted, fontSize = 11.sp)
++        val calib by vm.jog.calibration.collectAsStateWithLifecycle()
++        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++            if (calib < 0) {
++                for (deck in 0..1) {
++                    MetalButton(
++                        "Calibrar o prato do deck ${AppViewModel.deckName(deck)}: gire uma volta inteira e toque PRONTO",
++                        { vm.jog.startCalibration(deck) }, modifier = Modifier.width(150.dp).height(44.dp),
++                    ) { Text("CALIBRAR ${AppViewModel.deckName(deck)}", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.align(Alignment.Center)) }
++                }
++            } else {
++                Text("Gire o prato UMA volta inteira… $calib passos", color = Metal.Warning, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
++                MetalButton("Terminar a calibração do prato", {
++                    val n = vm.jog.finishCalibration()
++                    if (n > 0) tpr = n
++                    vm.say(if (n > 0) "Prato calibrado: $n passos por volta." else "Calibração cancelada: gire uma volta inteira antes de tocar PRONTO.")
++                }, led = Metal.Success, ledOn = true, modifier = Modifier.width(110.dp).height(44.dp)) {
++                    Text("PRONTO", color = Metal.OnMetal, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.align(Alignment.Center))
++                }
++                MetalButton("Cancelar a calibração", { vm.jog.cancelCalibration() }, modifier = Modifier.width(100.dp).height(44.dp)) {
++                    Text("CANCELAR", color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.align(Alignment.Center))
++                }
++            }
++        }
++        val modes by vm.midi.jogModes.collectAsStateWithLifecycle()
++        Text("Codificação do prato (se girar para um lado andar para o outro, ou pular, troque aqui):", color = Metal.TextMuted, fontSize = 11.sp)
++        for (deck in 0..1) {
++            val names = listOf(0 to "COMPL. 2", 1 to "CENTRO 64", 3 to "SINAL", 4 to "ABSOLUTO")
++            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.height(40.dp)) {
++                Text("PRATO ${AppViewModel.deckName(deck)}", color = deckColor(deck), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.width(70.dp))
++                for ((m, label) in names) {
++                    MetalButton(
++                        "Codificação $label no prato do deck ${AppViewModel.deckName(deck)}",
++                        { vm.midi.setJogMode(deck, m) }, led = Metal.Success, ledOn = modes.getOrElse(deck) { 0 } == m,
++                        modifier = Modifier.weight(1f).fillMaxHeight(),
++                    ) { Text(label, color = Metal.OnMetal, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, modifier = Modifier.align(Alignment.Center)) }
++                }
++            }
++        }
+     }
+ }
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/app/src/main/java/app/djfusion/ui/PortraitScreen.kt d/app/src/main/java/app/djfusion/ui/PortraitScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/PortraitScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/PortraitScreen.kt
+@@ -72,6 +72,7 @@
+                 bpm = if (ui.hasBpm) ui.bpm else 0.0, firstBeatFrame = ui.firstBeatFrame, hotcues = ui.hotcues, cueNames = ui.hotcueNames,
+                 cue = { live.value.decks[deck].cueFrames }, deckColor = color,
+                 viewSeconds = AppViewModel.WAVE_ZOOMS[zoom], modifier = Modifier.fillMaxSize(),
++                ghost = { ghostBeats(vm, deck, live) },
+             )
+             Text(
+                 "${AppViewModel.deckName(deck)}  " + if (ui.loaded) ui.title else "vazio · toque em CARREGAR",
+@@ -100,6 +101,7 @@
+             modifier = Modifier.fillMaxHeight().width(150.dp),
+             onScratch = if (ready) ({ a: Boolean, v: Float -> vm.scratch(deck, a, v) }) else null,
+             onBend = if (ready) ({ a: Boolean, v: Float -> vm.jogBend(deck, a, v) }) else null,
++            onMove = if (ready) ({ r: Float, rim: Boolean -> vm.platterMove(deck, r, rim) }) else null,
+             vinyl = { vm.vinyl.value }, playing = { vm.decks.value[deck].playing },
+             cue = { live.value.decks[deck].cueFrames },
+         ) { EgMark(Modifier.size(42.dp)) }
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md c/tests/native/test_dsp.cpp d/tests/native/test_dsp.cpp
+--- a/tests/native/test_dsp.cpp
++++ b/tests/native/test_dsp.cpp
+@@ -946,6 +946,39 @@
+   CHECK(cEnd < 0.01);
+ }
+ 
++// Jog de controladora: scratch por posição chega ao ponto exato e para; o empurrão adianta a música sem mudar o pitch.
++static void testJogPosition() {
++  Engine e(kSr, 480);
++  e.loadTrack(0, makeSine(kSr * 10, 440, 0.5f)); e.setMaster(1.f); e.setCrossfader(0.f);
++  e.seekFrames(0, kSr * 2); renderN(e, 4800);
++  const int64_t p0 = e.deckInfo(0).positionFrames;
++  for (int k = 0; k < 10; ++k) { e.scratchMove(0, 480.0); renderN(e, 240); }   // 10 passos de 10 ms
++  renderN(e, kSr / 10);
++  const int64_t p1 = e.deckInfo(0).positionFrames;
++  for (int k = 0; k < 5; ++k) { e.scratchMove(0, -960.0); renderN(e, 240); }
++  renderN(e, kSr / 10);
++  const int64_t p2 = e.deckInfo(0).positionFrames;
++  renderN(e, kSr / 10);
++  const int64_t p3 = e.deckInfo(0).positionFrames;
++  std::printf("  jog por posição: +%lld (esperado +4800), volta %lld (esperado -4800), parado: %lld\n",
++              (long long)(p1 - p0), (long long)(p2 - p1), (long long)(p3 - p2));
++  CHECK(std::llabs((p1 - p0) - 4800) < 24);
++  CHECK(std::llabs((p2 - p1) + 4800) < 24);
++  CHECK(std::llabs(p3 - p2) < 2);
++  e.scratch(0, false, 0.f);
++  // empurrão: tocando, +2400 quadros adianta a música exatamente isso em relação a um deck igual sem empurrão
++  Engine a(kSr, 480), b(kSr, 480);
++  for (Engine* x : {&a, &b}) { x->loadTrack(0, makeSine(kSr * 10, 440, 0.5f)); x->setMaster(1.f); x->setCrossfader(0.f); x->play(0); renderN(*x, 4800); }
++  b.nudge(0, 2400.0);
++  auto oa = renderN(a, kSr / 2); auto ob = renderN(b, kSr / 2);
++  const int64_t diff = b.deckInfo(0).positionFrames - a.deckInfo(0).positionFrames;
++  bool fin = true; for (float v : ob) fin = fin && std::isfinite(v);
++  std::printf("  empurrão do prato: +%lld quadros (esperado +2400)\n", (long long)diff);
++  CHECK(fin);
++  CHECK(std::llabs(diff - 2400) < 4);
++  (void)oa;
++}
++
+ static void testBuiltin() {
+   Engine e(kSr, 480);
+   e.setMaster(1.f);
+@@ -973,6 +1006,7 @@
+   testFxAudible();
+   testFxSlots();
+   testXfCurves();
++  testJogPosition();
+   testBuiltin();
+   testStems();
+   testNew();
