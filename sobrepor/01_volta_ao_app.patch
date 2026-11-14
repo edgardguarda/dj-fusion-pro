@@ -1,0 +1,42 @@
+--- a/app/src/androidTest/java/app/djfusion/E2ETest.kt
++++ b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+@@ -92,9 +92,28 @@
+             fails++
+             log("FALHA $name :: ${t.javaClass.simpleName}: ${t.message} | mensagem do app: ${vm.message.value}")
+             runCatching { shot("FALHA_" + name.take(30).replace(Regex("[^A-Za-z0-9]"), "_")) }
++            backToApp()
+         }
+     }
+ 
++    /** Depois de uma falha, outra tela (seletor do Android, apps recentes) pode ter ficado na frente: volta ao app. */
++    private fun backToApp() {
++        repeat(4) {
++            if (device.hasObject(By.pkg(ctx.packageName))) return
++            device.pressBack()
++            SystemClock.sleep(800)
++        }
++        if (!device.hasObject(By.pkg(ctx.packageName))) {
++            ctx.startActivity(
++                android.content.Intent(ctx, MainActivity::class.java).addFlags(
++                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
++                ),
++            )
++            device.wait(Until.hasObject(By.pkg(ctx.packageName)), 8000)
++        }
++        runCatching { rule.waitForIdle() }
++    }
++
+     private fun waitFor(ms: Long, what: String, cond: () -> Boolean) {
+         val end = SystemClock.uptimeMillis() + ms
+         while (SystemClock.uptimeMillis() < end) {
+@@ -140,7 +159,9 @@
+     private fun tap(desc: String, substring: Boolean = false) {
+         dismissSystemDialogs()
+         val pt = center(desc, substring)
+-        check(device.click(pt.x, pt.y), "toque em '$desc' não foi aceito")
++        // o retorno do click pode ser falso quando outra janela abre no mesmo instante (ex.: seletor de arquivos);
++        // o efeito do toque é conferido depois pelo próprio passo
++        if (!device.click(pt.x, pt.y)) log("info  toque em '$desc' sem confirmação do sistema")
+         SystemClock.sleep(300)
+     }
+ 
