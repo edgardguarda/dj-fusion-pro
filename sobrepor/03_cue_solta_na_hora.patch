@@ -1,0 +1,56 @@
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md b/app/src/androidTest/java/app/djfusion/E2ETest.kt c/app/src/androidTest/java/app/djfusion/E2ETest.kt
+--- a/app/src/androidTest/java/app/djfusion/E2ETest.kt
++++ b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+@@ -508,8 +508,7 @@
+             check(vm.decks.value[0].playing, "CUE segurado não tocou")
+             check(pos(0) > cue + 9600, "prévia não andou")
+             rule.runOnUiThread { vm.cueUp(0) }
+-            SystemClock.sleep(500)
+-            check(!vm.decks.value[0].playing, "soltar o CUE não parou")
++            waitFor(2000, "soltar o CUE parar") { !vm.decks.value[0].playing }
+             check(abs(pos(0) - cue) < 4800, "soltar o CUE não voltou ao ponto")
+             // CUE segurado + PLAY: continua tocando
+             rule.runOnUiThread { vm.cueDown(0) }; SystemClock.sleep(300)
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md b/app/src/main/java/app/djfusion/ui/AppViewModel.kt c/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+--- a/app/src/main/java/app/djfusion/ui/AppViewModel.kt
++++ b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+@@ -1330,19 +1330,27 @@
+                 NativeEngine.nativeSeek(deck, snapped)
+                 viewModelScope.launch { delay(25); NativeEngine.nativeCue(deck); NativeEngine.nativePlay(deck) }
+                 cueHeld[deck] = true
++                cueDownAt[deck] = android.os.SystemClock.uptimeMillis() + 25
+                 return
+             }
+             NativeEngine.nativeCue(deck)
+             NativeEngine.nativePlay(deck)
+             cueHeld[deck] = true
++            cueDownAt[deck] = android.os.SystemClock.uptimeMillis()
+         }
+     }
+ 
++    /** Quando o CUE começou a ser segurado (para soltar na hora, sem esperar a fila da tela). */
++    private val cueDownAt = LongArray(2)
++
+     fun cueUp(deck: Int) {
+         if (!cueHeld[deck]) return
+         cueHeld[deck] = false
+-        viewModelScope.launch {
+-            delay(30)   // deixa a prévia começar antes de voltar (toque rápido = só marca o CUE)
++        val held = android.os.SystemClock.uptimeMillis() - cueDownAt[deck]
++        // segurou de verdade: volta ao ponto na hora; toque rápido: deixa a prévia começar antes (só marca o CUE)
++        if (held >= 40) NativeEngine.nativeCue(deck)
++        else viewModelScope.launch {
++            delay(40 - held)
+             NativeEngine.nativeCue(deck)
+         }
+     }
+@@ -1568,7 +1576,8 @@
+         val endFrame = shape.musicalEnd(d.wave, d.lengthFrames)
+         val totalBeats = ((endFrame - d.firstBeatFrame) / beat).toInt()
+         val groove = shape.grooveBeat(d.wave, d.firstBeatFrame, beat)
+-        val outro = shape.outroBeat(d.wave, d.firstBeatFrame, beat, totalBeats)
++        // saída grudada no fim da música não serve para mixar: fica sem a cue 4
++        val outro = shape.outroBeat(d.wave, d.firstBeatFrame, beat, totalBeats).let { if (it >= totalBeats - 16) -1 else it }
+         val drop = shape.dropBeat(d.wave, d.firstBeatFrame, beat, groove + 32, if (outro > 0) outro - 16 else totalBeats - 32)
+         val picks = listOf(startBeat to "INÍCIO", groove to "GROOVE", drop to "DROP", outro to "SAÍDA")
+         val frames = MutableList(8) { if (force && it < 4) -1L else d.hotcues[it] }
