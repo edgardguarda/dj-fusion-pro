@@ -1,0 +1,1124 @@
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/build.gradle.kts b/app/build.gradle.kts
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -12,8 +12,8 @@
+         applicationId = "app.djfusion.pro"   // provisório, muda no /replica-brand
+         minSdk = 27                           // AAudio disponível
+         targetSdk = 35
+-        versionCode = 23
+-        versionName = "2.3.0"
++        versionCode = 24
++        versionName = "2.4.0"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+ 
+         ndk {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/androidTest/java/app/djfusion/E2ETest.kt b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+--- a/app/src/androidTest/java/app/djfusion/E2ETest.kt
++++ b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+@@ -308,6 +308,8 @@
+             waitFor(5000, "pads prontos") { vm.pads.value.all { it.ready } && vm.pads.value[0].label == "BUZINA" }
+         }
+         step("app abre e liga o áudio") {
++            // cues automáticas e proteção contra silêncio têm passos próprios: desligadas no resto do teste
++            rule.runOnUiThread { vm.setAutoCues(false); vm.setSilenceGuard(false) }
+             waitFor(8000, "status do áudio") { vm.audioStatus.value.contains("Hz") }
+             log("info  áudio: ${vm.audioStatus.value}")
+         }
+@@ -805,7 +807,8 @@
+             val beat = (48000.0 * 60 / vm.decks.value[0].bpm).toLong()
+             check((vm.decks.value[0].firstBeatFrame - f0 - 240).mod(beat) == 0L, "grade ${vm.decks.value[0].firstBeatFrame} (antes $f0)")
+             rule.runOnUiThread { vm.setPadMode(0, 3) }
+-            SystemClock.sleep(300)
++            // deixa a tela redesenhar os pads de MANOBRAS antes dos próximos toques (senão o toque cai na GRADE)
++            SystemClock.sleep(300); rule.waitForIdle(); SystemClock.sleep(200)
+         }
+         step("REVERSO toca para trás e volta (com SLIP)") {
+             app.djfusion.audio.NativeEngine.nativeSeek(0, 48_000L * 12)
+@@ -947,6 +950,22 @@
+             check(vm.decks.value[0].fxType == 1, "eco ${vm.decks.value[0].fxType}")
+             tap("Efeito ECO do deck A (tela", substring = true)
+         }
++        step("3 EFEITOS juntos (encaixes FX1, FX2 e FX3)") {
++            tap("Efeito ECO do deck A (tela", substring = true)
++            tap("Encaixe FX2 do deck A (tela", substring = true)
++            check(vm.decks.value[0].fxSel == 1, "encaixe FX2 ${vm.decks.value[0].fxSel}")
++            tap("Efeito REVERB do deck A (tela", substring = true)
++            tap("Encaixe FX3 do deck A (tela", substring = true)
++            tap("Efeito PHASER do deck A (tela", substring = true)
++            val d = vm.decks.value[0]
++            log("info  efeitos: FX1=${d.fxType} FX2=${d.fx2Type} FX3=${d.fx3Type}")
++            check(d.fxType == 1 && d.fx2Type == 3 && d.fx3Type == 6, "três efeitos: ${d.fxType} ${d.fx2Type} ${d.fx3Type}")
++            SystemClock.sleep(400); shot("tres_efeitos")
++            tap("Desligar os 3 efeitos do deck A", substring = true)
++            check(vm.decks.value[0].let { it.fxType == 0 && it.fx2Type == 0 && it.fx3Type == 0 }, "desligar os 3")
++            tap("Encaixe FX1 do deck A (tela", substring = true)
++            check(vm.decks.value[0].fxSel == 0, "voltar ao FX1")
++        }
+         step("FILTRO AUTO sobe o filtro sozinho") {
+             tap("Filtro automático do deck A", substring = true)
+             SystemClock.sleep(3000)
+@@ -1021,6 +1040,57 @@
+             vm.setOutputMode(0)
+             SystemClock.sleep(1000)
+         }
++        step("MIXAGEM: curva do crossfader") {
++            node("Crossfader mixagem", true).performScrollTo(); rule.waitForIdle()
++            tap("Crossfader mixagem", substring = true)
++            waitFor(2000, "curva mixagem") { vm.xfCurve.value == 1 }
++            tap("Crossfader corte", substring = true)
++            waitFor(2000, "curva corte") { vm.xfCurve.value == 2 }
++            tap("Crossfader suave", substring = true)
++            waitFor(2000, "curva suave") { vm.xfCurve.value == 0 }
++            shot("ajustes_mixagem")
++        }
++        step("CUES AUTOMÁTICAS e nome da hot cue") {
++            rule.runOnUiThread { vm.prepareCues(0) }
++            waitFor(3000, "cues automáticas") { (0..3).any { vm.decks.value[0].hotcues[it] >= 0 } }
++            val d = vm.decks.value[0]
++            log("info  cues automáticas: " + (0..3).joinToString { "${it + 1}=${if (d.hotcues[it] >= 0) "%.1fs %s".format(d.hotcues[it] / 48000.0, d.hotcueNames[it]) else "—"}" })
++            val beat = 48000.0 * 60 / d.bpm
++            for (sl in 0..3) if (d.hotcues[sl] >= 0) {
++                val off = ((d.hotcues[sl] - d.firstBeatFrame) / beat).let { it - Math.round(it) }
++                check(abs(off) < 0.02, "cue automática ${sl + 1} fora da batida ($off)")
++            }
++            val slot = (0..3).first { d.hotcues[it] >= 0 }
++            rule.runOnUiThread { vm.openCueEdit(0, slot) }
++            rule.waitForIdle(); SystemClock.sleep(300)
++            shot("menu_hot_cue")
++            tap("Nome DROP para a hot cue ${slot + 1} do deck A", substring = true)
++            waitFor(2000, "nome") { vm.decks.value[0].hotcueNames[slot] == "DROP" }
++            check(vm.cueEdit.value == null, "menu não fechou")
++            rule.runOnUiThread { for (sl in 0..3) vm.clearHotcue(0, sl) }
++            check((0..3).all { vm.decks.value[0].hotcues[it] < 0 }, "limpar cues")
++        }
++        step("PROTEÇÃO contra silêncio: o final entra em loop") {
++            val nE = app.djfusion.audio.NativeEngine
++            nE.nativePause(1); nE.nativePause(0)
++            rule.runOnUiThread { vm.setSilenceGuard(true) }
++            val d = vm.decks.value[0]
++            check(d.loopBeats == 0, "deck A já em loop")
++            val beat = 48000.0 * 60 / d.bpm
++            val end = app.djfusion.harmony.TrackShape.musicalEnd(d.wave, d.lengthFrames)
++            nE.nativeSeek(0, (end - 9 * beat).toLong())
++            SystemClock.sleep(300)
++            nE.nativePlay(0)
++            waitFor(4000, "loop de proteção") { vm.decks.value[0].loopBeats == 4 }
++            SystemClock.sleep(2500)
++            check(vm.decks.value[0].playing, "o som parou")
++            check(pos(0) < end, "passou do fim (${pos(0)} >= $end)")
++            log("info  ${vm.message.value}")
++            rule.runOnUiThread { vm.toggleLoop(0, 4); vm.setSilenceGuard(false) }
++            nE.nativePause(0)
++            SystemClock.sleep(300)
++            check(vm.decks.value[0].loopBeats == 0, "loop não soltou")
++        }
+         tab("CONTROLADORA")
+         shot("controladora")
+         step("DJ2GO2 simulada: BROWSE, LOAD, hot cue, loop manual, sampler e jog") {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/cpp/core/engine.cpp b/app/src/main/cpp/core/engine.cpp
+--- a/app/src/main/cpp/core/engine.cpp
++++ b/app/src/main/cpp/core/engine.cpp
+@@ -27,7 +27,8 @@
+   for (int k = 0; k < kGrain; ++k) {
+     win_[k] = 0.5f * (1.f - std::cos(6.28318530717958648f * static_cast<float>(k) / static_cast<float>(kGrain)));
+   }
+-  for (int d = 0; d < kDecks; ++d) d_[d].fx = DeckFx(sampleRate);
++  for (int d = 0; d < kDecks; ++d)
++    for (int s = 0; s < kFxSlots; ++s) d_[d].fx[s] = DeckFx(sampleRate);
+ }
+ 
+ // ---------------------------------------------------------------- controle
+@@ -131,14 +132,20 @@
+   send(c);
+ }
+ 
+-void Engine::setFx(int deck, int type, float amount, double beatSeconds) {
+-  if (deck < 0 || deck >= kDecks) return;
++void Engine::setCrossfaderCurve(int curve) {
++  Cmd c; c.type = CmdType::XfCurve; c.i = (curve >= 0 && curve <= 2) ? curve : 0;
++  send(c);
++}
++
++void Engine::setFx(int deck, int type, float amount, double beatSeconds, int slot) {
++  if (deck < 0 || deck >= kDecks || slot < 0 || slot >= kFxSlots) return;
+   Cmd c;
+   c.type = CmdType::Fx;
+   c.deck = static_cast<uint8_t>(deck);
+   c.f = clamp01(amount);
+   c.i = (type >= 0 && type < DeckFx::kTypes) ? type : 0;
+   c.j = static_cast<int64_t>((beatSeconds >= 0.05 && beatSeconds <= 5.0 ? beatSeconds : 0.5) * 1e6);
++  c.d[0] = slot;
+   send(c);
+ }
+ 
+@@ -328,6 +335,7 @@
+   Cmd c;
+   while (queue_.pop(c)) {
+     if (c.type == CmdType::Crossfader) { xTarget_ = c.f; continue; }
++    if (c.type == CmdType::XfCurve) { xCurve_ = static_cast<int>(c.i); xCached_ = -1.f; continue; }
+     if (c.type == CmdType::Master) { masterTarget_ = c.f; continue; }
+     if (c.type == CmdType::HpLevel) { hpTarget_ = c.f; continue; }
+     if (c.type == CmdType::HpMix) { hpMixTarget_ = c.f; continue; }
+@@ -419,7 +427,7 @@
+         }
+         break;
+       case CmdType::Fx:
+-        d_[c.deck].fx.set(static_cast<int>(c.i), c.f, static_cast<double>(c.j) * 1e-6);
++        d_[c.deck].fx[static_cast<int>(c.d[0])].set(static_cast<int>(c.i), c.f, static_cast<double>(c.j) * 1e-6);
+         break;
+       case CmdType::LoopOff:
+         D.loopOn = false;
+@@ -705,8 +713,16 @@
+     masterSm_ += (masterTarget_ - masterSm_) * smoothCoef_;
+     if (xSm_ != xCached_) {  // trigonometria só quando o crossfader se mexe
+       xCached_ = xSm_;
+-      xgC_[0] = std::cos(xSm_ * kHalfPi);
+-      xgC_[1] = std::sin(xSm_ * kHalfPi);
++      if (xCurve_ == 1) {          // mixagem: os dois cheios no meio, cai só na metade de cada lado
++        xgC_[0] = std::min(1.f, 2.f * (1.f - xSm_));
++        xgC_[1] = std::min(1.f, 2.f * xSm_);
++      } else if (xCurve_ == 2) {   // corte: abre logo no começo do curso (scratch)
++        xgC_[0] = std::min(1.f, (1.f - xSm_) / 0.04f);
++        xgC_[1] = std::min(1.f, xSm_ / 0.04f);
++      } else {
++        xgC_[0] = std::cos(xSm_ * kHalfPi);
++        xgC_[1] = std::sin(xSm_ * kHalfPi);
++      }
+     }
+     const float xg[kDecks] = {xgC_[0], xgC_[1]};
+ 
+@@ -828,7 +844,7 @@
+         }
+       }
+ 
+-      D.fx.process(l, r, smoothCoef_);
++      for (int s = 0; s < kFxSlots; ++s) D.fx[s].process(l, r, smoothCoef_);
+       if (D.cueOn) { cueL += l; cueR += r; }   // pré-escuta: antes do fader e do crossfader
+ 
+       D.volSm += (D.vol - D.volSm) * smoothCoef_;
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/cpp/core/engine.h b/app/src/main/cpp/core/engine.h
+--- a/app/src/main/cpp/core/engine.h
++++ b/app/src/main/cpp/core/engine.h
+@@ -56,7 +56,11 @@
+   void setLoop(int deck, int64_t start, int64_t end);
+   void clearLoop(int deck);
+   // Efeito do deck: type 0 desligado, 1 eco, 2 flanger, 3 reverb. amount 0..1. beatSeconds ajusta o eco à batida.
+-  void setFx(int deck, int type, float amount, double beatSeconds);
++  /** Efeito do deck em um dos 3 encaixes (slot 0..2), processados em série. */
++  /** Curva do crossfader: 0 suave, 1 mixagem, 2 corte. */
++  void setCrossfaderCurve(int curve);
++  void setFx(int deck, int type, float amount, double beatSeconds, int slot = 0);
++  static constexpr int kFxSlots = 3;
+   // Key-lock: muda o andamento sem mudar o tom (esticamento por grãos com alinhamento de fase, WSOLA).
+   void setKeyLock(int deck, bool on);
+   // Stems: ganho de 0 a 1 de cada parte (0 voz, 1 bateria, 2 baixo, 3 resto). Só tem efeito depois que a
+@@ -113,7 +117,7 @@
+   void render(float* out, int frames, float* hp = nullptr);
+ 
+  private:
+-  enum class CmdType : uint8_t { Play, Pause, Cue, Seek, Volume, Crossfader, Master, Load, Rate, Eq, Filter, LoopOn, LoopOff, Fx, KeyLock, Scratch, HpCue, HpLevel, HpMix, PlaySynced, SampLoad, SampPlay, SampStop, SampVol, SampRate, StemGain, KeyShift, Trim };
++  enum class CmdType : uint8_t { Play, Pause, Cue, Seek, Volume, Crossfader, Master, Load, Rate, Eq, Filter, LoopOn, LoopOff, Fx, KeyLock, Scratch, HpCue, HpLevel, HpMix, PlaySynced, SampLoad, SampPlay, SampStop, SampVol, SampRate, StemGain, KeyShift, Trim, XfCurve };
+   struct Cmd {
+     CmdType type = CmdType::Play;
+     uint8_t deck = 0;
+@@ -150,7 +154,7 @@
+     int filterMode = 0;                     // 0 desligado, 1 passa-baixas, 2 passa-altas
+     bool loopOn = false;
+     int64_t loopStart = 0, loopEnd = 0;
+-    DeckFx fx;
++    DeckFx fx[3];
+     // key-lock
+     bool keyLock = false;
+     bool stretchReset = true;
+@@ -224,6 +228,7 @@
+   DeckAudio d_[kDecks];
+   float xTarget_ = 0.5f, xSm_ = 0.5f;
+   float xCached_ = -1.f, xgC_[2] = {0.f, 0.f};
++  int xCurve_ = 0;  // 0 suave (potência constante), 1 mixagem (cheio no meio), 2 corte (scratch)
+   float masterTarget_ = 0.9f, masterSm_ = 0.9f;
+   float masterPeakLocal_ = 0.f;
+   float hpTarget_ = 0.7f, hpSm_ = 0.7f, hpMixTarget_ = 0.f, hpMixSm_ = 0.f;
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/cpp/native_bridge.cpp b/app/src/main/cpp/native_bridge.cpp
+--- a/app/src/main/cpp/native_bridge.cpp
++++ b/app/src/main/cpp/native_bridge.cpp
+@@ -181,8 +181,11 @@
+ JNI(void, nativeSetMaster)(JNIEnv*, jclass, jfloat v) { engine().setMaster(v); }
+ JNI(void, nativeSetRate)(JNIEnv*, jclass, jint deck, jfloat rate) { engine().setRate(deck, rate); }
+ JNI(void, nativeSetEq)(JNIEnv*, jclass, jint deck, jint band, jfloat v) { engine().setEq(deck, band, v); }
++JNI(void, nativeSetCrossfaderCurve)(JNIEnv*, jclass, jint curve) { engine().setCrossfaderCurve(curve); }
++
+ JNI(void, nativeSetFx)(JNIEnv*, jclass, jint deck, jint type, jfloat amount, jfloat beatSeconds) {
+-  engine().setFx(deck, type, amount, beatSeconds);
++  // encaixe do efeito nos bits altos: tipo + 16 × encaixe (0..2)
++  engine().setFx(deck, type & 15, amount, beatSeconds, (type >> 4) & 3);
+ }
+ JNI(void, nativeSetKeyLock)(JNIEnv*, jclass, jint deck, jboolean on) { engine().setKeyLock(deck, on == JNI_TRUE); }
+ JNI(void, nativeScratch)(JNIEnv*, jclass, jint deck, jboolean active, jfloat velocity) {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/audio/NativeEngine.kt b/app/src/main/java/app/djfusion/audio/NativeEngine.kt
+--- a/app/src/main/java/app/djfusion/audio/NativeEngine.kt
++++ b/app/src/main/java/app/djfusion/audio/NativeEngine.kt
+@@ -65,7 +65,9 @@
+     @JvmStatic external fun nativeSetHeadphoneLevel(value: Float)
+     @JvmStatic external fun nativeSetHeadphoneMix(value: Float)
+     @JvmStatic external fun nativeSetFilter(deck: Int, value: Float)
++    /** [type] = efeito + 16 × encaixe (0..2): até 3 efeitos ao mesmo tempo por deck. */
+     @JvmStatic external fun nativeSetFx(deck: Int, type: Int, amount: Float, beatSeconds: Float)
++    @JvmStatic external fun nativeSetCrossfaderCurve(curve: Int)
+     @JvmStatic external fun nativeSetLoop(deck: Int, start: Long, end: Long)
+     @JvmStatic external fun nativeClearLoop(deck: Int)
+     /** out = [bpm (0 = não detectado), primeira batida em quadros, confiança 0 a 1]. */
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/data/LibraryDb.kt b/app/src/main/java/app/djfusion/data/LibraryDb.kt
+--- a/app/src/main/java/app/djfusion/data/LibraryDb.kt
++++ b/app/src/main/java/app/djfusion/data/LibraryDb.kt
+@@ -45,7 +45,7 @@
+  * Só guarda o endereço (content://) de arquivos que o usuário escolheu, nunca cópias dos arquivos.
+  * Guarda também o andamento detectado e as hot cues de cada faixa. Playlists e tom entram depois, com migração.
+  */
+-class LibraryDb(context: Context) : SQLiteOpenHelper(context, "library.db", null, 4) {
++class LibraryDb(context: Context) : SQLiteOpenHelper(context, "library.db", null, 5) {
+ 
+     override fun onCreate(db: SQLiteDatabase) {
+         db.execSQL(
+@@ -67,7 +67,7 @@
+     private fun createHotcues(db: SQLiteDatabase) {
+         db.execSQL(
+             "CREATE TABLE IF NOT EXISTS hotcues (" +
+-                "track_id INTEGER NOT NULL, slot INTEGER NOT NULL, frame INTEGER NOT NULL, " +
++                "track_id INTEGER NOT NULL, slot INTEGER NOT NULL, frame INTEGER NOT NULL, name TEXT NOT NULL DEFAULT '', " +
+                 "PRIMARY KEY (track_id, slot))",
+         )
+     }
+@@ -85,6 +85,8 @@
+             db.execSQL("ALTER TABLE tracks ADD COLUMN key_conf REAL")
+         }
+         if (oldVersion < 4) db.execSQL("ALTER TABLE tracks ADD COLUMN energy REAL")
++        // nomes das hot cues (v5); quem veio de antes da v2 já criou a tabela com a coluna
++        if (oldVersion in 2..4) db.execSQL("ALTER TABLE hotcues ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+     }
+ 
+     /** Análise já feita desta faixa, ou null se o andamento ainda não foi analisado. A tonalidade pode faltar (-1). */
+@@ -165,11 +167,31 @@
+         return out
+     }
+ 
+-    fun setHotcue(trackId: Long, slot: Int, frame: Long) {
++    /** Nome de cada hot cue ("" sem nome). */
++    fun hotcueNames(trackId: Long): List<String> {
++        val out = MutableList(8) { "" }
++        readableDatabase.query(
++            "hotcues", arrayOf("slot", "name"), "track_id = ?", arrayOf(trackId.toString()), null, null, null,
++        ).use { c ->
++            while (c.moveToNext()) {
++                val slot = c.getInt(0)
++                if (slot in 0..7) out[slot] = c.getString(1) ?: ""
++            }
++        }
++        return out
++    }
++
++    fun renameHotcue(trackId: Long, slot: Int, name: String) {
++        val v = ContentValues().apply { put("name", name) }
++        writableDatabase.update("hotcues", v, "track_id = ? AND slot = ?", arrayOf(trackId.toString(), slot.toString()))
++    }
++
++    fun setHotcue(trackId: Long, slot: Int, frame: Long, name: String = "") {
+         val values = ContentValues().apply {
+             put("track_id", trackId)
+             put("slot", slot)
+             put("frame", frame)
++            put("name", name)
+         }
+         writableDatabase.insertWithOnConflict("hotcues", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+     }
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/harmony/TrackShape.kt b/app/src/main/java/app/djfusion/harmony/TrackShape.kt
+--- a/app/src/main/java/app/djfusion/harmony/TrackShape.kt
++++ b/app/src/main/java/app/djfusion/harmony/TrackShape.kt
+@@ -129,4 +129,32 @@
+         // só muda se o 1 for claramente mais forte (música de batida reta não tem diferença)
+         return if (score[best] > others * 1.06) best else 0
+     }
++
++    /**
++     * Batida do "drop": onde os graves voltam com mais força depois de uma parte mais vazia (break).
++     * Procura em compassos (4 batidas), entre [fromBeat] e [toBeat]; -1 se não houver uma volta clara.
++     */
++    fun dropBeat(wave: ByteArray?, firstBeat: Long, beatFrames: Double, fromBeat: Int, toBeat: Int): Int {
++        val low = bandPerBeat(wave, firstBeat, beatFrames, 0)
++        if (low.size < 48) return -1
++        val ref = median(low)
++        if (ref <= 0f) return -1
++        var best = -1
++        var bestScore = 0.0
++        var b = ((fromBeat + 3) / 4) * 4
++        val end = minOf(toBeat, low.size - 8)
++        while (b in 16..end) {
++            var after = 0.0; var before = 0.0
++            for (k in 0 until 8) after += low[b + k]
++            for (k in 1..16) before += low[b - k]
++            after /= 8.0; before /= 16.0
++            // depois forte (perto do normal) e antes vazio: a volta do break
++            if (after >= ref * 0.85 && before < ref * 0.6) {
++                val score = after - before
++                if (score > bestScore) { bestScore = score; best = b }
++            }
++            b += 4
++        }
++        return best
++    }
+ }
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/ui/AppRoot.kt b/app/src/main/java/app/djfusion/ui/AppRoot.kt
+--- a/app/src/main/java/app/djfusion/ui/AppRoot.kt
++++ b/app/src/main/java/app/djfusion/ui/AppRoot.kt
+@@ -2,6 +2,9 @@
+ 
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.clickable
++import androidx.compose.foundation.gestures.detectTapGestures
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.ui.input.pointer.pointerInput
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.layout.Row
+@@ -68,6 +71,7 @@
+                 ) {
+                     PortraitScreen(vm)
+                     browser?.let { QuickBrowser(vm, it) }
++                    CueEditOverlay(vm)
+                     message?.let { text ->
+                         LaunchedEffect(text) { delay(3500); vm.clearMessage(text) }
+                         Text(
+@@ -138,6 +142,7 @@
+                     Screen.SETTINGS -> SettingsScreen(vm)
+                 }
+                 browser?.let { QuickBrowser(vm, it) }
++                CueEditOverlay(vm)
+                 val text = message
+                 if (text != null) {
+                     LaunchedEffect(text) {
+@@ -236,3 +241,68 @@
+         Text(label, color = if (since != null) Metal.DeckA else Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, modifier = Modifier.align(Alignment.Center))
+     }
+ }
++
++/** Nomes rápidos para hot cues (toque e pronto, sem teclado no meio do set). */
++private val CUE_NAMES = listOf("INTRO", "VERSO", "REFRÃO", "PONTE", "BREAK", "DROP", "VOZ", "SAÍDA")
++
++/** Menu da hot cue (segurar o pad): escolher um nome ou apagar. */
++@Composable
++private fun CueEditOverlay(vm: AppViewModel) {
++    val edit by vm.cueEdit.collectAsStateWithLifecycle()
++    val (deck, slot) = edit ?: return
++    val decks by vm.decks.collectAsStateWithLifecycle()
++    val ui = decks[deck]
++    val name = AppViewModel.deckName(deck)
++    val current = ui.hotcueNames.getOrElse(slot) { "" }
++    val c = HOT_COLORS[slot]
++    Box(
++        Modifier.fillMaxSize().background(Color(0xAA000000))
++            .pointerInput(Unit) { detectTapGestures { vm.closeCueEdit() } },
++        contentAlignment = Alignment.Center,
++    ) {
++        Column(
++            Modifier.width(470.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF1C2024))
++                .pointerInput(Unit) { detectTapGestures { } }.padding(14.dp),
++            verticalArrangement = Arrangement.spacedBy(8.dp),
++        ) {
++            Text(
++                "HOT CUE ${slot + 1} · DECK $name" + if (current.isNotEmpty()) " · $current" else "",
++                color = c, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
++            )
++            Text("Escolha um nome para lembrar o que tem nesse ponto:", color = Metal.TextMuted, fontSize = 11.sp)
++            for (row in 0..1) Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
++                for (n in CUE_NAMES.subList(row * 4, row * 4 + 4)) {
++                    MetalButton(
++                        description = "Nome $n para a hot cue ${slot + 1} do deck $name",
++                        onPress = { vm.renameHotcue(deck, slot, n); vm.closeCueEdit() },
++                        led = c, ledOn = current == n,
++                        modifier = Modifier.weight(1f).fillMaxHeight(),
++                    ) { Text(n, color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, modifier = Modifier.align(Alignment.Center)) }
++                }
++            }
++            Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
++                MetalButton(
++                    description = "Tirar o nome da hot cue ${slot + 1} do deck $name",
++                    onPress = { vm.renameHotcue(deck, slot, ""); vm.closeCueEdit() },
++                    modifier = Modifier.weight(1f).fillMaxHeight(),
++                ) { Text("SEM NOME", color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.align(Alignment.Center)) }
++                MetalButton(
++                    description = "Apagar a hot cue ${slot + 1} do deck $name",
++                    onPress = { vm.clearHotcue(deck, slot); vm.closeCueEdit() },
++                    led = Color(0xFFFF5252), ledOn = true,
++                    modifier = Modifier.weight(1f).fillMaxHeight(),
++                ) { Text("APAGAR CUE", color = Color(0xFFFF8A80), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.align(Alignment.Center)) }
++                MetalButton(
++                    description = "Refazer as cues automáticas 1 a 4 do deck $name (início, groove, drop e saída)",
++                    onPress = { vm.prepareCues(deck); vm.closeCueEdit() },
++                    modifier = Modifier.weight(1f).fillMaxHeight(),
++                ) { Text("CUES AUTO", color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.align(Alignment.Center)) }
++                MetalButton(
++                    description = "Fechar o menu da hot cue",
++                    onPress = { vm.closeCueEdit() },
++                    modifier = Modifier.weight(1f).fillMaxHeight(),
++                ) { Text("FECHAR", color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.align(Alignment.Center)) }
++            }
++        }
++    }
++}
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/ui/AppViewModel.kt b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+--- a/app/src/main/java/app/djfusion/ui/AppViewModel.kt
++++ b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+@@ -67,6 +67,14 @@
+     /** Efeito do deck: 0 desligado, 1 eco, 2 flanger, 3 reverb, e a mistura de 0 a 1. */
+     val fxType: Int = 0,
+     val fxAmount: Float = 0.5f,
++    /** Encaixes 2 e 3 de efeito (tocam junto com o primeiro, em série) e o encaixe que os botões controlam (0..2). */
++    val fx2Type: Int = 0,
++    val fx2Amount: Float = 0.5f,
++    val fx3Type: Int = 0,
++    val fx3Amount: Float = 0.5f,
++    val fxSel: Int = 0,
++    /** Nome de cada hot cue ("" = sem nome; mostra o número). */
++    val hotcueNames: List<String> = List(8) { "" },
+     /** Key-lock: o andamento muda sem mudar o tom. */
+     val keyLock: Boolean = false,
+     /** Pré-escuta no fone (PFL). */
+@@ -108,6 +116,18 @@
+     val trim: Float = 1f,
+ ) {
+     val stemsReady: Boolean get() = stemProgress >= 1f
++    fun fxTypeAt(slot: Int): Int = when (slot) { 0 -> fxType; 1 -> fx2Type; else -> fx3Type }
++    fun fxAmountAt(slot: Int): Float = when (slot) { 0 -> fxAmount; 1 -> fx2Amount; else -> fx3Amount }
++    /** Efeito e mistura do encaixe que os botões controlam agora. */
++    val selFxType: Int get() = fxTypeAt(fxSel)
++    val selFxAmount: Float get() = fxAmountAt(fxSel)
++    /** Encaixe (0..2) onde o efeito [type] está ligado, ou -1. */
++    fun fxSlotOf(type: Int): Int = (0..2).firstOrNull { fxTypeAt(it) == type } ?: -1
++    fun withFx(slot: Int, type: Int = fxTypeAt(slot), amount: Float = fxAmountAt(slot)): DeckUi = when (slot) {
++        0 -> copy(fxType = type, fxAmount = amount)
++        1 -> copy(fx2Type = type, fx2Amount = amount)
++        else -> copy(fx3Type = type, fx3Amount = amount)
++    }
+     val energyLevel: Int get() = if (energy < 0f) 0 else (1 + Math.round(energy * 9f)).coerceIn(1, 10)
+     /** Tonalidade original, se detectada com confiança. */
+     val key: MusicalKey?
+@@ -813,6 +833,7 @@
+                 NativeEngine.nativeSetHeadphoneMix(_hpMix.value)
+                 NativeEngine.nativeSetMaster(_master.value)
+                 NativeEngine.nativeSetCrossfader(_crossfader.value)
++                NativeEngine.nativeSetCrossfaderCurve(_xfCurve.value)
+                 NativeEngine.nativeSetVolume(0, _volumes.value[0])
+                 NativeEngine.nativeSetVolume(1, _volumes.value[1])
+                 refreshAudioStatus()
+@@ -1253,6 +1274,7 @@
+                 if (tick % 6 == 0) syncPadSpeeds()
+                 phaseLock()
+                 if (tick % 15 == 7) checkOnAir()
++                if (tick % 6 == 3) silenceGuardTick()
+                 if (tick > 10 && tick % 4 == 1) syncLeds()   // LEDs da controladora (depois de tudo iniciado)
+                 if (++tick % 30 == 0) launch(Dispatchers.Default) { NativeEngine.nativeCollectGarbage() }
+                 delay(33)
+@@ -1448,6 +1470,125 @@
+         say(if (_vinyl.value) "Modo VINIL: tocar no disco faz scratch; a borda empurra." else "Modo VINIL desligado: o prato só empurra e segura a música.")
+     }
+ 
++    private val _xfCurve = MutableStateFlow(outPrefs.getInt("xf_curve", 0).coerceIn(0, 2))
++    /** Curva do crossfader: 0 SUAVE (mixagem longa), 1 MIXAGEM (os dois cheios no meio), 2 CORTE (scratch). */
++    val xfCurve: StateFlow<Int> = _xfCurve.asStateFlow()
++    fun setXfCurve(c: Int) {
++        _xfCurve.value = c.coerceIn(0, 2)
++        outPrefs.edit().putInt("xf_curve", _xfCurve.value).apply()
++        NativeEngine.nativeSetCrossfaderCurve(_xfCurve.value)
++        say(when (_xfCurve.value) {
++            0 -> "Crossfader SUAVE: transições longas, sem buraco no volume."
++            1 -> "Crossfader MIXAGEM: as duas músicas cheias no meio."
++            else -> "Crossfader CORTE: abre logo no começo do curso (scratch)."
++        })
++    }
++
++    private val _autoCues = MutableStateFlow(outPrefs.getBoolean("auto_cues", true))
++    /** Marca sozinho INÍCIO, GROOVE, DROP e SAÍDA nas hot cues 1–4 de músicas sem cues. */
++    val autoCues: StateFlow<Boolean> = _autoCues.asStateFlow()
++    fun setAutoCues(on: Boolean) {
++        _autoCues.value = on
++        outPrefs.edit().putBoolean("auto_cues", on).apply()
++        say(if (on) "Cues automáticas: músicas novas já chegam com INÍCIO, GROOVE, DROP e SAÍDA." else "Cues automáticas desligadas.")
++    }
++
++    private val _silenceGuard = MutableStateFlow(outPrefs.getBoolean("silence_guard", true))
++    /** Proteção contra silêncio: se a música acabar sem outra tocando, o final entra em loop. */
++    val silenceGuard: StateFlow<Boolean> = _silenceGuard.asStateFlow()
++    fun setSilenceGuard(on: Boolean) {
++        _silenceGuard.value = on
++        outPrefs.edit().putBoolean("silence_guard", on).apply()
++        say(if (on) "Proteção contra silêncio ligada." else "Proteção contra silêncio desligada.")
++    }
++
++    /** Fim musical de cada deck (id da faixa, quadro) e a última faixa já protegida. */
++    private val guardEnd = arrayOf(-1L to 0L, -1L to 0L)
++    private val guardDone = longArrayOf(-1L, -1L)
++
++    /**
++     * Proteção contra silêncio: a música do ar chegando ao fim e nada mais tocando (sem AUTO DJ) →
++     * liga um loop de 1 compasso no final, no tempo, até o DJ soltar ou a próxima entrar.
++     */
++    private fun silenceGuardTick() {
++        if (!_silenceGuard.value || autoDj.state.value.active) return
++        val ds = _decks.value
++        for (d in 0..1) {
++            val u = ds[d]
++            if (!u.playing || u.loopBeats != 0 || !u.hasBpm || u.trackId < 0 || guardDone[d] == u.trackId) continue
++            if (ds[1 - d].playing) continue
++            if (guardEnd[d].first != u.trackId) guardEnd[d] = u.trackId to app.djfusion.harmony.TrackShape.musicalEnd(u.wave, u.lengthFrames)
++            val beat = 60.0 * NativeEngine.SAMPLE_RATE / u.bpm
++            val left = (guardEnd[d].second - posOf(d)) / beat
++            if (left in 5.0..10.0) {
++                guardDone[d] = u.trackId
++                toggleLoop(d, 4)
++                if (_decks.value[d].loopBeats == 4) say("PROTEÇÃO: o final do deck ${deckName(d)} entrou em loop para o som não parar. Solte o loop quando a próxima entrar.")
++            }
++        }
++    }
++
++    // ------------------------------------------------------- hot cues: nomes e cues automáticas
++
++    private val _cueEdit = MutableStateFlow<Pair<Int, Int>?>(null)
++    /** Hot cue sendo editada (deck, posição) — abre o menu de nome/apagar. */
++    val cueEdit: StateFlow<Pair<Int, Int>?> = _cueEdit.asStateFlow()
++    fun openCueEdit(deck: Int, slot: Int) {
++        if (_decks.value[deck].hotcues.getOrElse(slot) { -1L } < 0) return
++        _cueEdit.value = deck to slot
++    }
++    fun closeCueEdit() { _cueEdit.value = null }
++
++    fun renameHotcue(deck: Int, slot: Int, name: String) {
++        val d = _decks.value[deck]
++        if (d.trackId < 0 || slot !in 0..7 || d.hotcues[slot] < 0) return
++        val n = name.trim().uppercase(java.util.Locale.ROOT).take(10)
++        setDeck(deck) { it.copy(hotcueNames = it.hotcueNames.mapIndexed { i, old -> if (i == slot) n else old }) }
++        val id = d.trackId
++        viewModelScope.launch(Dispatchers.IO) { db.renameHotcue(id, slot, n) }
++    }
++
++    /**
++     * Cues automáticas (como a preparação de um DJ): 1 INÍCIO (primeiro compasso com som), 2 GROOVE (a batida
++     * completa entra), 3 DROP (volta forte depois do break) e 4 SAÍDA (onde começa o final). Só em faixas sem cues 1–4.
++     */
++    private fun applyAutoCues(deck: Int) { if (_autoCues.value) prepareCues(deck, force = false) }
++
++    /** Marca as cues automáticas agora. Com [force], refaz as cues 1–4 mesmo se já existirem. */
++    fun prepareCues(deck: Int, force: Boolean = true) {
++        val d = _decks.value[deck]
++        if (!d.hasBpm || d.trackId < 0 || d.wave == null) { if (force) say("Cues automáticas precisam do andamento detectado."); return }
++        if (!force && (0..3).any { d.hotcues[it] >= 0 }) return
++        val beat = 60.0 * NativeEngine.SAMPLE_RATE / d.bpm
++        val shape = app.djfusion.harmony.TrackShape
++        val bar = 4 * beat
++        fun atBeat(b: Int): Long = (d.firstBeatFrame + b * beat).toLong()
++        val startFrame = shape.musicalStart(d.wave)
++        val startBeat = kotlin.math.max(0.0, Math.floor((startFrame - d.firstBeatFrame) / bar) * 4).toInt()
++        val endFrame = shape.musicalEnd(d.wave, d.lengthFrames)
++        val totalBeats = ((endFrame - d.firstBeatFrame) / beat).toInt()
++        val groove = shape.grooveBeat(d.wave, d.firstBeatFrame, beat)
++        val outro = shape.outroBeat(d.wave, d.firstBeatFrame, beat, totalBeats)
++        val drop = shape.dropBeat(d.wave, d.firstBeatFrame, beat, groove + 32, if (outro > 0) outro - 16 else totalBeats - 32)
++        val picks = listOf(startBeat to "INÍCIO", groove to "GROOVE", drop to "DROP", outro to "SAÍDA")
++        val frames = MutableList(8) { if (force && it < 4) -1L else d.hotcues[it] }
++        val names = MutableList(8) { if (force && it < 4) "" else d.hotcueNames[it] }
++        val used = HashSet<Int>()
++        for ((slot, p) in picks.withIndex()) {
++            val (b, n) = p
++            if (b < 0 || b >= totalBeats || !used.add(b)) continue
++            val f = atBeat(b).coerceIn(0L, (d.lengthFrames - 1).coerceAtLeast(0L))
++            frames[slot] = f; names[slot] = n
++        }
++        if ((0..3).none { frames[it] >= 0 }) return
++        setDeck(deck) { if (it.trackId != d.trackId) it else it.copy(hotcues = frames, hotcueNames = names) }
++        val id = d.trackId
++        viewModelScope.launch(Dispatchers.IO) {
++            for (slot in 0..3) if (frames[slot] >= 0) db.setHotcue(id, slot, frames[slot], names[slot]) else if (force) db.deleteHotcue(id, slot)
++        }
++        say("Cues automáticas no deck ${deckName(deck)}: " + (0..3).filter { frames[it] >= 0 }.joinToString(" · ") { "${it + 1} ${names[it]}" })
++    }
++
+     fun pitchBend(deck: Int, dir: Int, on: Boolean) {
+         bending[deck] = on
+         val d = _decks.value[deck]
+@@ -1662,13 +1803,31 @@
+ 
+     /** Liga o efeito [type] (toque de novo no mesmo para desligar). */
+     fun setFx(deck: Int, type: Int) {
+-        val cur = _decks.value[deck].fxType
+-        setDeck(deck) { it.copy(fxType = if (cur == type) 0 else type) }
++        setDeck(deck) { d ->
++            val sel = d.fxSel
++            if (d.fxTypeAt(sel) == type) d.withFx(sel, type = 0)
++            else {
++                // o mesmo efeito não fica em dois encaixes: sai do outro e vem para o escolhido
++                val other = d.fxSlotOf(type)
++                (if (other >= 0) d.withFx(other, type = 0) else d).withFx(sel, type = type)
++            }
++        }
+         pushFx(deck)
+     }
+ 
+     fun setFxAmount(deck: Int, v: Float) {
+-        setDeck(deck) { it.copy(fxAmount = v.coerceIn(0f, 1f)) }
++        setDeck(deck) { it.withFx(it.fxSel, amount = v.coerceIn(0f, 1f)) }
++        pushFx(deck)
++    }
++
++    /** Escolhe qual dos 3 encaixes de efeito os botões e o botão giratório controlam. */
++    fun setFxSlot(deck: Int, slot: Int) {
++        setDeck(deck) { it.copy(fxSel = slot.coerceIn(0, 2)) }
++    }
++
++    /** Desliga os 3 efeitos do deck de uma vez. */
++    fun clearFx(deck: Int) {
++        setDeck(deck) { it.copy(fxType = 0, fx2Type = 0, fx3Type = 0) }
+         pushFx(deck)
+     }
+ 
+@@ -1680,7 +1839,7 @@
+         val d = _decks.value[deck]
+         // o motor usa 3/4 do valor como atraso do eco: escala para o eco cair na divisão escolhida
+         val beat = (if (d.hasBpm) (60.0 / d.playedBpm).toFloat() else 0.5f) * d.fxBeats / 0.75f
+-        NativeEngine.nativeSetFx(deck, d.fxType, d.fxAmount, beat.coerceIn(0.06f, 5f))
++        for (slot in 0..2) NativeEngine.nativeSetFx(deck, d.fxTypeAt(slot) + 16 * slot, d.fxAmountAt(slot), beat.coerceIn(0.06f, 5f))
+     }
+ 
+     private fun posMod(a: Double, m: Double): Double = ((a % m) + m) % m
+@@ -1767,7 +1926,12 @@
+             val st = LongArray(4)
+             NativeEngine.nativeDeckState(deck, st)
+             val frame = snapToBeat(d, st[1])           // QUANTIZE: a cue cai exatamente na batida
+-            setDeck(deck) { it.copy(hotcues = it.hotcues.mapIndexed { i, old -> if (i == slot) frame else old }) }
++            setDeck(deck) {
++                it.copy(
++                    hotcues = it.hotcues.mapIndexed { i, old -> if (i == slot) frame else old },
++                    hotcueNames = it.hotcueNames.mapIndexed { i, old -> if (i == slot) "" else old },
++                )
++            }
+             val id = d.trackId
+             viewModelScope.launch(Dispatchers.IO) { db.setHotcue(id, slot, frame) }
+         } else {
+@@ -1786,7 +1950,12 @@
+     fun clearHotcue(deck: Int, slot: Int) {
+         val d = _decks.value[deck]
+         if (d.trackId < 0 || slot !in 0..7 || d.hotcues[slot] < 0) return
+-        setDeck(deck) { it.copy(hotcues = it.hotcues.mapIndexed { i, old -> if (i == slot) -1L else old }) }
++        setDeck(deck) {
++            it.copy(
++                hotcues = it.hotcues.mapIndexed { i, old -> if (i == slot) -1L else old },
++                hotcueNames = it.hotcueNames.mapIndexed { i, old -> if (i == slot) "" else old },
++            )
++        }
+         val id = d.trackId
+         viewModelScope.launch(Dispatchers.IO) { db.deleteHotcue(id, slot) }
+         say("Hot cue ${slot + 1} apagada.")
+@@ -1829,6 +1998,7 @@
+                     // 1) já tocável: usa a análise guardada (se houver) e libera o deck na hora
+                     val cached = withContext(Dispatchers.IO) { db.analysis(row.id) }
+                     val hot = withContext(Dispatchers.IO) { db.hotcues(row.id) }
++                    val hotNames = withContext(Dispatchers.IO) { db.hotcueNames(row.id) }
+                     val complete = cached != null && cached.keyTonic >= 0 && cached.energy >= 0f
+                     val a0 = cached ?: Analysis(0.0, 0L, 0f)
+                     NativeEngine.nativeSetRate(deck, 1f)
+@@ -1837,7 +2007,7 @@
+                             trackId = row.id, title = row.title, artist = row.artist, loading = false, analyzing = !complete,
+                             loadProgress = 1f, lengthFrames = frames, wave = wave,
+                             bpm = a0.bpm, firstBeatFrame = a0.firstBeatFrame,
+-                            bpmConfidence = a0.confidence, rate = 1f, loopBeats = 0, hotcues = hot,
++                            bpmConfidence = a0.confidence, rate = 1f, loopBeats = 0, hotcues = hot, hotcueNames = hotNames,
+                             keyTonic = a0.keyTonic, keyMinor = a0.keyMinor, keyConf = a0.keyConf,
+                             energy = a0.energy,
+                         )
+@@ -1874,6 +2044,7 @@
+                     }
+                     applyTrim(deck)
+                     pushFx(deck)
++                    applyAutoCues(deck)
+                     refreshAutoSamples(deck)
+                     if (!complete) say("${row.title}: ${if (a.bpm > 0) String.format(java.util.Locale.ROOT, "%.1f BPM", a.bpm) else "sem andamento"}${_decks.value[deck].key?.let { k -> ", tom ${k.code}" } ?: ""}.")
+                     // 3) stems por último (demora mais)
+@@ -2102,6 +2273,9 @@
+     /** Músicas que tocaram no som geral desde que o app abriu (ordem em que entraram). */
+     val history: StateFlow<List<Played>> = _history.asStateFlow()
+     private val onAir = longArrayOf(-1L, -1L)
++    /** Faixas que já foram ao ar nesta noite (marcadas com ✓ na biblioteca para não repetir). */
++    val playedIds: StateFlow<Set<Long>> = _history.map { h -> h.map { it.trackId }.toSet() }
++        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+ 
+     /** Uma música "vai ao ar" quando toca com volume e com o crossfader do lado dela. */
+     private fun checkOnAir() {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/ui/Browser.kt b/app/src/main/java/app/djfusion/ui/Browser.kt
+--- a/app/src/main/java/app/djfusion/ui/Browser.kt
++++ b/app/src/main/java/app/djfusion/ui/Browser.kt
+@@ -154,7 +154,8 @@
+         verticalAlignment = Alignment.CenterVertically,
+     ) {
+         Column(Modifier.weight(1f)) {
+-            Text(row.title, color = Metal.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
++            val played = row.id in vm.playedIds.collectAsStateWithLifecycle().value
++            Text((if (played) "✓ " else "") + row.title, color = if (played) Metal.TextMuted else Metal.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+             if (r.relation != null) {
+                 Text(
+                     r.relation + (r.detail?.let { " · $it" } ?: ""),
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/ui/Components.kt b/app/src/main/java/app/djfusion/ui/Components.kt
+--- a/app/src/main/java/app/djfusion/ui/Components.kt
++++ b/app/src/main/java/app/djfusion/ui/Components.kt
+@@ -487,8 +487,15 @@
+     deckColor: Color,
+     modifier: Modifier = Modifier,
+     viewSeconds: Float = VIEW_SECONDS.toFloat(),
++    cueNames: List<String> = emptyList(),
+ ) {
+     val paints = remember { specPaints() }
++    val tagPaint = remember {
++        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
++            color = android.graphics.Color.rgb(20, 23, 27)
++            typeface = android.graphics.Typeface.DEFAULT_BOLD
++        }
++    }
+     val buf = remember { arrayOf(Array(SPEC_N) { FloatArray(0) }) }
+     val counts = remember { IntArray(SPEC_N) }
+     val corePaint = remember { android.graphics.Paint().apply { color = 0x55FFFFFF; style = android.graphics.Paint.Style.STROKE } }
+@@ -581,7 +588,12 @@
+             val x = ((f - pos) / perPx + w / 2f).toFloat()
+             if (x < -10f || x > w + 10f) continue
+             drawLine(padCols[slot], Offset(x, 0f), Offset(x, h), 2.dp.toPx())
+-            drawRect(padCols[slot], Offset(x, 0f), Size(14.dp.toPx(), 12.dp.toPx()))
++            // etiqueta com o número e o nome da cue (ex.: "3 DROP")
++            val label = "${slot + 1}" + cueNames.getOrElse(slot) { "" }.let { if (it.isNotEmpty()) " $it" else "" }
++            tagPaint.textSize = 9.dp.toPx()
++            val tw = tagPaint.measureText(label) + 5.dp.toPx()
++            drawRect(padCols[slot], Offset(x, 0f), Size(maxOf(14.dp.toPx(), tw), 12.dp.toPx()))
++            drawContext.canvas.nativeCanvas.drawText(label, x + 2.5f.dp.toPx(), 9.5f.dp.toPx(), tagPaint)
+         }
+         val cf = cue()
+         if (cf > 0) {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt b/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
+@@ -107,7 +107,7 @@
+                 position = { live.value.decks[deck].positionFrames },
+                 bpm = if (ui.hasBpm) ui.bpm else 0.0,
+                 firstBeatFrame = ui.firstBeatFrame,
+-                hotcues = ui.hotcues,
++                hotcues = ui.hotcues, cueNames = ui.hotcueNames,
+                 cue = { live.value.decks[deck].cueFrames },
+                 deckColor = color,
+                 viewSeconds = zoomSec,
+@@ -307,7 +307,28 @@
+                 fontSize = 20.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, maxLines = 1,
+             )
+             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+-                Text(if (ui.syncLock) "SYNC" else "BPM", color = if (ui.syncLock) color else Metal.TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
++                val all by vm.decks.collectAsStateWithLifecycle()
++                val other = all[1 - deck]
++                // diferença de andamento para o outro deck (para acertar no ouvido): verde quando bate
++                val delta = if (ready && ui.hasBpm && other.loaded && other.hasBpm && !ui.syncLock) ui.playedBpm - other.playedBpm else null
++                Text(
++                    when {
++                        ui.syncLock -> "SYNC"
++                        delta != null -> (if (delta >= 0) "+" else "−") + String.format(java.util.Locale.ROOT, "%.2f", kotlin.math.abs(delta))
++                        else -> "BPM"
++                    },
++                    color = when {
++                        ui.syncLock -> color
++                        delta != null && kotlin.math.abs(delta) < 0.05 -> Metal.Success
++                        delta != null && kotlin.math.abs(delta) < 1.0 -> Metal.Warning
++                        delta != null -> Color(0xFFFF6B6B)
++                        else -> Metal.TextMuted
++                    },
++                    fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1,
++                    modifier = Modifier.semantics {
++                        contentDescription = if (delta != null) "Diferença de andamento do deck $name para o outro: " + String.format(java.util.Locale.ROOT, "%.2f", delta) + " BPM" else "Andamento do deck $name"
++                    },
++                )
+                 KeyChip(
+                     ui.shownKey, otherKey, small = true,
+                     modifier = Modifier
+@@ -472,14 +493,15 @@
+ 
+         when (ui.padMode) {
+             0 -> {
+-                PadRowLabel("HOT CUES 1–8 · segure para apagar")
++                PadRowLabel("HOT CUES 1–8 · segure para dar nome ou apagar")
+                 for (row in 0..1) {
+                     padRow {
+                         for (slot in row * 4 until row * 4 + 4) {
+                             HotCuePad(
+                                 slot = slot, frame = ui.hotcues[slot], enabled = ready, deckName = name,
++                                label = ui.hotcueNames.getOrElse(slot) { "" },
+                                 onTap = { if (ready) vm.hotcue(deck, slot) else hint() },
+-                                onLong = { vm.clearHotcue(deck, slot) },
++                                onLong = { vm.openCueEdit(deck, slot) },
+                                 modifier = Modifier.weight(1f).fillMaxHeight(),
+                             )
+                         }
+@@ -587,20 +609,34 @@
+                 }
+             }
+         }
+-        PadRowLabel("EFEITO · quantidade")
++        val activeFx = (0..2).map { ui.fxTypeAt(it) }.filter { it > 0 }.joinToString("+") { FX_NAMES[it - 1].take(4) }
++        PadRowLabel("EFEITOS · encaixe FX${ui.fxSel + 1}" + if (activeFx.isNotEmpty()) " · ligados: $activeFx" else " · até 3 juntos")
+         Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
++            MetalButton(
++                description = "Encaixe de efeito do deck $name: FX${ui.fxSel + 1}. Toque para trocar (até 3 efeitos juntos).",
++                onPress = { vm.setFxSlot(deck, (ui.fxSel + 1) % 3) },
++                led = color, ledOn = ui.selFxType > 0,
++                modifier = Modifier.weight(1.1f).fillMaxHeight(),
++            ) {
++                Text("FX${ui.fxSel + 1}", color = color, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false)
++            }
+             for (t in 1..FX_SHORT.size) {   // na tela DJ cabem os 6 principais; os outros ficam em EFEITOS
++                val slot = ui.fxSlotOf(t)
+                 MetalButton(
+                     description = "Efeito ${FX_NAMES[t - 1]} do deck $name. Toque de novo para desligar.",
+                     onPress = { vm.setFx(deck, t) },
+-                    led = color, ledOn = ui.fxType == t,
++                    led = color, ledOn = slot >= 0,
+                     modifier = Modifier.weight(1f).fillMaxHeight(),
+                 ) {
+-                    Text(FX_SHORT[t - 1], color = if (ui.fxType == t) color else Metal.OnMetal, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false)
++                    Text(
++                        FX_SHORT[t - 1] + if (slot >= 0 && slot != ui.fxSel) "${slot + 1}" else "",
++                        color = when { slot == ui.fxSel -> color; slot >= 0 -> color.copy(alpha = 0.6f); else -> Metal.OnMetal },
++                        fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false,
++                    )
+                 }
+             }
+             MetalFader(
+-                value = ui.fxAmount, onChange = { vm.setFxAmount(deck, it) }, accent = color, fill = true,
++                value = ui.selFxAmount, onChange = { vm.setFxAmount(deck, it) }, accent = color, fill = true,
+                 description = "Quantidade do efeito do deck $name",
+                 modifier = Modifier.weight(1.6f).fillMaxHeight(), vertical = false,
+             )
+@@ -719,7 +755,7 @@
+ /** Pad de hot cue: vazio grava a posição atual, gravado vai até ela e toca, toque longo apaga. */
+ @Composable
+ private fun HotCuePad(
+-    slot: Int, frame: Long, enabled: Boolean, deckName: String,
++    slot: Int, frame: Long, enabled: Boolean, deckName: String, label: String,
+     onTap: () -> Unit, onLong: () -> Unit, modifier: Modifier,
+ ) {
+     val set = frame >= 0
+@@ -728,7 +764,7 @@
+         modifier
+             .semantics {
+                 contentDescription = if (set) {
+-                    "Hot cue ${slot + 1} do deck $deckName. Toque para ir até ela. Segure para apagar."
++                    "Hot cue ${slot + 1} do deck $deckName${if (label.isNotEmpty()) " ($label)" else ""}. Toque para ir até ela. Segure para dar nome ou apagar."
+                 } else {
+                     "Hot cue ${slot + 1} do deck $deckName, vazia. Toque para gravar a posição atual."
+                 }
+@@ -756,10 +792,17 @@
+             },
+         contentAlignment = Alignment.Center,
+     ) {
++        val txt = when {
++            set && label.isNotEmpty() -> "${slot + 1} $label"
++            slot == 6 -> "7 ENTRA"
++            slot == 7 -> "8 SAI"
++            else -> "${slot + 1}"
++        }
+         Text(
+-            when (slot) { 6 -> "7 ENTRA"; 7 -> "8 SAI"; else -> "${slot + 1}" },
++            txt,
+             color = if (set && enabled) Color(0xFF14171B) else c.copy(alpha = if (enabled) 0.9f else 0.35f),
+-            fontSize = if (slot >= 6) 11.sp else 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false,
++            fontSize = if (txt.length > 6) 10.sp else if (txt.length > 2) 11.sp else 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false,
++            overflow = androidx.compose.ui.text.style.TextOverflow.Clip,
+         )
+     }
+ }
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/ui/FxScreen.kt b/app/src/main/java/app/djfusion/ui/FxScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/FxScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/FxScreen.kt
+@@ -136,17 +136,38 @@
+             )
+             if (ui.hasBpm) Text(String.format(java.util.Locale.ROOT, "%.1f BPM", ui.playedBpm), color = Color(0xFF9AA4AE), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+         }
+-        Text("EFEITO (no ritmo da música)", color = Color(0xFF9AA4AE), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
++        Text("EFEITOS (no ritmo da música) · até 3 juntos: escolha o encaixe e depois o efeito", color = Color(0xFF9AA4AE), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
++        Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++            for (slot in 0..2) {
++                val t = ui.fxTypeAt(slot)
++                MetalButton(
++                    description = "Encaixe FX${slot + 1} do deck $name (tela de efeitos)",
++                    onPress = { vm.setFxSlot(deck, slot) },
++                    led = color, ledOn = ui.fxSel == slot,
++                    modifier = Modifier.weight(1f).fillMaxHeight(),
++                ) {
++                    Text(
++                        "FX${slot + 1}: " + (if (t > 0) FX_NAMES[t - 1] else "—") + (if (t > 0) " ${Math.round(ui.fxAmountAt(slot) * 100)}%" else ""),
++                        color = if (ui.fxSel == slot) color else Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false,
++                    )
++                }
++            }
++            MetalButton(
++                description = "Desligar os 3 efeitos do deck $name",
++                onPress = { vm.clearFx(deck) },
++                modifier = Modifier.weight(0.7f).fillMaxHeight(),
++            ) { Text("DESLIGA", color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1) }
++        }
+         for (row in 0..1) Row(Modifier.fillMaxWidth().height(46.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+             val names = FX_NAMES
+             for (t in (row * 4 + 1)..minOf(FX_NAMES.size, row * 4 + 4)) {
+                 MetalButton(
+                     description = "Efeito ${names[t - 1]} do deck $name (tela de efeitos). Toque de novo para desligar.",
+                     onPress = { vm.setFx(deck, t) },
+-                    led = color, ledOn = ui.fxType == t,
++                    led = color, ledOn = ui.fxSlotOf(t) >= 0,
+                     modifier = Modifier.weight(1f).fillMaxHeight(),
+                 ) {
+-                    Text(names[t - 1], color = if (ui.fxType == t) color else Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false)
++                    Text(names[t - 1], color = if (ui.fxSlotOf(t) == ui.fxSel) color else if (ui.fxSlotOf(t) >= 0) color.copy(alpha = 0.6f) else Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false)
+                 }
+             }
+         }
+@@ -154,7 +175,7 @@
+             Column(Modifier.weight(1f)) {
+                 Text("QUANTIDADE", color = Color(0xFF9AA4AE), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                 MetalFader(
+-                    value = ui.fxAmount, onChange = { vm.setFxAmount(deck, it) }, accent = color, fill = true,
++                    value = ui.selFxAmount, onChange = { vm.setFxAmount(deck, it) }, accent = color, fill = true,
+                     description = "Quantidade do efeito do deck $name (tela de efeitos)",
+                     modifier = Modifier.fillMaxWidth().height(40.dp), vertical = false,
+                 )
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/ui/LibraryScreen.kt b/app/src/main/java/app/djfusion/ui/LibraryScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/LibraryScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/LibraryScreen.kt
+@@ -162,7 +162,8 @@
+                         verticalAlignment = Alignment.CenterVertically,
+                     ) {
+                         Column(Modifier.weight(1f)) {
+-                            Text(row.title, color = Metal.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
++                            val played = row.id in vm.playedIds.collectAsStateWithLifecycle().value
++                            Text((if (played) "✓ " else "") + row.title, color = if (played) Metal.TextMuted else Metal.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                             Text(
+                                 if (row.artist.isEmpty()) "Artista desconhecido" else row.artist,
+                                 color = Metal.TextMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/ui/PortraitScreen.kt b/app/src/main/java/app/djfusion/ui/PortraitScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/PortraitScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/PortraitScreen.kt
+@@ -69,7 +69,7 @@
+         Box(Modifier.fillMaxWidth().weight(1f)) {
+             ScrollingWave(
+                 peaks = ui.wave, position = { live.value.decks[deck].positionFrames },
+-                bpm = if (ui.hasBpm) ui.bpm else 0.0, firstBeatFrame = ui.firstBeatFrame, hotcues = ui.hotcues,
++                bpm = if (ui.hasBpm) ui.bpm else 0.0, firstBeatFrame = ui.firstBeatFrame, hotcues = ui.hotcues, cueNames = ui.hotcueNames,
+                 cue = { live.value.decks[deck].cueFrames }, deckColor = color,
+                 viewSeconds = AppViewModel.WAVE_ZOOMS[zoom], modifier = Modifier.fillMaxSize(),
+             )
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/app/src/main/java/app/djfusion/ui/SettingsScreen.kt b/app/src/main/java/app/djfusion/ui/SettingsScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/SettingsScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/SettingsScreen.kt
+@@ -31,6 +31,7 @@
+             verticalArrangement = Arrangement.spacedBy(10.dp),
+         ) {
+             OutputPanel(vm)
++            MixPanel(vm)
+             HistoryPanel(vm)
+             BackupPanel(vm)
+         }
+@@ -123,6 +124,43 @@
+     }
+ }
+ 
++@Composable
++private fun MixPanel(vm: AppViewModel) {
++    val curve by vm.xfCurve.collectAsStateWithLifecycle()
++    val autoCues by vm.autoCues.collectAsStateWithLifecycle()
++    val guard by vm.silenceGuard.collectAsStateWithLifecycle()
++    Panel("MIXAGEM") {
++        Text("Curva do crossfader", color = Metal.Text, fontSize = 12.sp, fontWeight = FontWeight.Bold)
++        ChoiceRow(
++            listOf(
++                "SUAVE" to "Crossfader suave: transições longas sem buraco no volume",
++                "MIXAGEM" to "Crossfader mixagem: as duas músicas cheias no meio",
++                "CORTE" to "Crossfader corte: abre logo no começo do curso, para scratch",
++            ),
++            curve,
++        ) { vm.setXfCurve(it) }
++        ChoiceRow(
++            listOf(
++                "CUES AUTO LIGADAS" to "Cues automáticas ligadas: INÍCIO, GROOVE, DROP e SAÍDA em músicas sem cues",
++                "CUES AUTO DESLIGADAS" to "Cues automáticas desligadas",
++            ),
++            if (autoCues) 0 else 1,
++        ) { vm.setAutoCues(it == 0) }
++        ChoiceRow(
++            listOf(
++                "PROTEÇÃO LIGADA" to "Proteção contra silêncio ligada: o final entra em loop se nada mais estiver tocando",
++                "PROTEÇÃO DESLIGADA" to "Proteção contra silêncio desligada",
++            ),
++            if (guard) 0 else 1,
++        ) { vm.setSilenceGuard(it == 0) }
++        Text(
++            "Cues automáticas: ao carregar uma música sem cues, as hot cues 1–4 marcam onde ela começa, onde entra a batida, o drop e a saída. " +
++                "Proteção contra silêncio: se a música chegar ao fim e o outro deck estiver parado, o último compasso fica em loop no tempo até você soltar.",
++            color = Metal.TextMuted, fontSize = 12.sp,
++        )
++    }
++}
++
+ @Composable
+ private fun DisplayPanel(vm: AppViewModel) {
+     Panel("VISOR") {
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md a/tests/native/test_dsp.cpp b/tests/native/test_dsp.cpp
+--- a/tests/native/test_dsp.cpp
++++ b/tests/native/test_dsp.cpp
+@@ -910,6 +910,42 @@
+   }
+ }
+ 
++// Três efeitos ao mesmo tempo no deck: o encaixe vazio não muda nada; dois encaixes somam.
++static void testFxSlots() {
++  auto tr = makeSine(kSr * 4, 330, 0.4f);
++  for (int64_t i = 0; i < tr->frames; ++i) if ((i % (kSr / 2)) > kSr / 20) { tr->pcm[2 * i] = 0; tr->pcm[2 * i + 1] = 0; }
++  Engine one(kSr, 480), two(kSr, 480), off(kSr, 480);
++  for (Engine* e : {&one, &two, &off}) { e->loadTrack(0, tr); e->setCrossfader(0.f); e->setMaster(1.f); e->play(0); e->setFx(0, DeckFx::Echo, 1.f, 0.5, 0); }
++  two.setFx(0, DeckFx::Reverb, 1.f, 0.5, 2);
++  off.setFx(0, DeckFx::Off, 1.f, 0.5, 1);
++  off.setFx(0, DeckFx::Reverb, 1.f, 0.5, 7);   // encaixe inválido: ignorado
++  auto a = renderN(one, kSr * 2), b = renderN(two, kSr * 2), c = renderN(off, kSr * 2);
++  double d2 = 0, d0 = 0, ref = 0;
++  for (size_t i = kSr / 2; i < a.size(); ++i) { d2 += (a[i] - b[i]) * (a[i] - b[i]); d0 += (a[i] - c[i]) * (a[i] - c[i]); ref += a[i] * a[i]; }
++  std::printf("  eco + reverb em encaixes separados: mudança %.2f (encaixe vazio %.4f)\n", std::sqrt(d2 / ref), std::sqrt(d0 / ref));
++  CHECK(std::sqrt(d2 / ref) > 0.2);
++  CHECK(std::sqrt(d0 / ref) < 1e-4);
++}
++
++// Curvas do crossfader: suave (-3 dB no meio), mixagem (cheio no meio) e corte (abre no começo do curso).
++static void testXfCurves() {
++  auto peakA = [](int curve, float x) {
++    Engine e(kSr, 480);
++    e.loadTrack(0, makeSine(kSr * 2, 440, 0.5f)); e.setMaster(1.f); e.setCrossfaderCurve(curve); e.setCrossfader(x); e.play(0);
++    renderN(e, kSr / 2);
++    auto o = renderN(e, kSr / 4);
++    double p = 0; for (float v : o) p = std::max(p, (double)std::fabs(v));
++    return p;
++  };
++  const double full = peakA(0, 0.f);
++  const double s = peakA(0, 0.5f) / full, m = peakA(1, 0.5f) / full, c = peakA(2, 0.9f) / full, cEnd = peakA(2, 1.f) / full;
++  std::printf("  crossfader no meio: suave %.2f, mixagem %.2f; corte em 90%%: %.2f, no fim: %.2f\n", s, m, c, cEnd);
++  CHECK(std::fabs(s - 0.707) < 0.03);
++  CHECK(std::fabs(m - 1.0) < 0.03);
++  CHECK(std::fabs(c - 1.0) < 0.03);
++  CHECK(cEnd < 0.01);
++}
++
+ static void testBuiltin() {
+   Engine e(kSr, 480);
+   e.setMaster(1.f);
+@@ -935,6 +971,8 @@
+ 
+ int main() {
+   testFxAudible();
++  testFxSlots();
++  testXfCurves();
+   testBuiltin();
+   testStems();
+   testNew();
