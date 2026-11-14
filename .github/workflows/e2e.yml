@@ -2,7 +2,7 @@ name: Teste no emulador
 on:
   workflow_dispatch:
   push:
-    paths: ['projeto.zip']
+    paths: ['projeto.zip', 'sobrepor/**']
 permissions:
   contents: write
 jobs:
@@ -12,7 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Abrir projeto
-        run: mkdir fonte && unzip -q projeto.zip -d fonte
+        run: |
+          mkdir fonte && unzip -q projeto.zip -d fonte
+          # correções pequenas enviadas depois do projeto (arquivos .patch na pasta sobrepor)
+          for p in sobrepor/*.patch; do if [ -f "$p" ]; then (cd fonte && patch -p1 -N < "../$p") || true; fi; done
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
