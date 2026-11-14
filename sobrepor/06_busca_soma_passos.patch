@@ -1,0 +1,32 @@
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md e/app/src/main/java/app/djfusion/ui/JogController.kt f/app/src/main/java/app/djfusion/ui/JogController.kt
+--- a/app/src/main/java/app/djfusion/ui/JogController.kt
++++ b/app/src/main/java/app/djfusion/ui/JogController.kt
+@@ -44,6 +44,8 @@
+     private class State {
+         @Volatile var touching = false
+         @Volatile var scratching = false
++        @Volatile var searchTarget = -1L
++        @Volatile var searchAt = 0L
+         var releaser: Runnable? = null
+     }
+ 
+@@ -93,9 +95,16 @@
+         val frames = ticks * framesPerTick()
+         when {
+             _search.value[deck] -> {
+-                val buf = LongArray(4)
+-                NativeEngine.nativeDeckState(deck, buf)
+-                val target = (buf[1] + frames * 20).toLong().coerceIn(0L, (d.lengthFrames - 1).coerceAtLeast(0L))
++                // giro contínuo soma no alvo anterior (o motor ainda pode não ter chegado lá); parado 200 ms, recomeça da posição
++                val now = android.os.SystemClock.uptimeMillis()
++                val base = if (now - s.searchAt < 200 && s.searchTarget >= 0) s.searchTarget else {
++                    val buf = LongArray(4)
++                    NativeEngine.nativeDeckState(deck, buf)
++                    buf[1]
++                }
++                val target = (base + frames * 20).toLong().coerceIn(0L, (d.lengthFrames - 1).coerceAtLeast(0L))
++                s.searchTarget = target
++                s.searchAt = now
+                 NativeEngine.nativeSeek(deck, target)
+             }
+             (s.touching && vm.vinyl.value) || !d.playing -> {
