@@ -1,0 +1,20 @@
+diff -ruN -U2 -x .git -x .gradle -x build -x .cxx -x e2e.yml -x build-log.md d/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt e/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
+--- a/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
+@@ -2,6 +2,7 @@
+ 
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.gestures.detectTapGestures
++import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.border
+@@ -118,7 +119,7 @@
+                     .pointerInput(Unit) { detectTapGestures(onDoubleTap = { vm.cycleWaveZoom() }) }
+                     .pointerInput(deck, zoomSec) {
+                         // arrastar a onda: parado procura o ponto exato; tocando empurra/segura a batida (como no Serato)
+-                        androidx.compose.foundation.gestures.detectHorizontalDragGestures { change, dx ->
++                        detectHorizontalDragGestures { change, dx ->
+                             change.consume()
+                             val frames = -dx * 48000.0 * zoomSec / size.width
+                             if (vm.decks.value[deck].playing) vm.nudge(deck, frames * 0.25) else vm.scrubBy(deck, frames.toLong())
