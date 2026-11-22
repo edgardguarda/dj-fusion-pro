@@ -1,0 +1,48 @@
+name: AURA native Android APK
+on:
+  push:
+    branches:
+      - aura-native-apk-20261122
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+permissions:
+  contents: read
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Extract AURA native project
+        run: |
+          mkdir -p aura-native/project
+          base64 -d aura-native/source.b64 > /tmp/aura-native-src.zip
+          unzip -q /tmp/aura-native-src.zip -d aura-native/project
+          test -f aura-native/project/app/src/main/java/br/com/edgard/aura/MainActivity.java
+      - name: Test audio core
+        run: bash tests/run-core-tests.sh
+        working-directory: aura-native/project
+      - name: Compile signed debug APK
+        run: gradle --no-daemon assembleDebug
+        working-directory: aura-native/project
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AURA-NATIVO-ANDROID-APK
+          path: aura-native/project/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
