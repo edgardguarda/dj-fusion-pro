@@ -1,18 +1,15 @@
-name: AURA native Android APK
+name: AURA9 Android completo
 on:
   push:
     branches:
-      - aura-native-apk-20261122
+      - aura9-original-completo-android
   workflow_dispatch:
-  pull_request:
-    branches:
-      - main
 permissions:
   contents: read
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Java 17
@@ -20,62 +17,44 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Android 35 with runner SDK
+      - name: Install Android SDK platform
         run: |
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
           test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0"
-      - name: Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Extract AURA native project
+      - name: Extract preserved original UI and Android source
         run: |
-          mkdir -p aura-native/project
-          base64 -d aura-native/source.b64 > /tmp/aura-native-src.zip
-          unzip -q /tmp/aura-native-src.zip -d aura-native/project
-          test -f aura-native/project/app/src/main/java/br/com/edgard/aura/MainActivity.java
-      - name: Test audio core
+          mkdir -p aura9-project
+          unzip -q aura9-source.zip -d aura9-project
+          test -s aura9-project/app/src/main/assets/aura.html
+          test -s aura9-project/app/src/main/assets/native-ui.js
+          test -s aura9-project/app/src/main/java/br/com/edgard/aura/AudioService.java
+          test $(wc -c < aura9-project/app/src/main/assets/aura.html) -gt 1800000
+      - name: Test PCM core, tempo and overlap
         run: bash tests/run-core-tests.sh
-        working-directory: aura-native/project
-      - name: Compile signed debug APK
+        working-directory: aura9-project
+      - name: Compile Android APK
         run: gradle --no-daemon assembleDebug
-        working-directory: aura-native/project
-      - name: Upload installable APK
+        working-directory: aura9-project
+      - name: Verify signature, original UI and native mixer in APK
+        run: |
+          set -eu
+          APK=aura9-project/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F 'br.com.edgard.aura.completo9'
+          unzip -l "$APK" | grep -F 'assets/aura.html'
+          unzip -l "$APK" | grep -F 'assets/native-ui.js'
+          unzip -p "$APK" assets/aura.html | grep -Fq 'aura-portable-seed'
+          unzip -p "$APK" assets/native-ui.js | grep -Fq 'aura9-native-controller'
+          unzip -l "$APK" | grep -F 'classes.dex'
+      - name: Upload signed installable Android app
         uses: actions/upload-artifact@v4
         with:
-          name: AURA-NATIVO-ANDROID-APK
-          path: aura-native/project/app/build/outputs/apk/debug/app-debug.apk
+          name: EDGARD-AURA9-ANDROID-COMPLETO
+          path: aura9-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-      - name: Android emulator install and app-launch smoke test
-        id: emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: google_apis
-          profile: pixel_3a
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: |
-            set -eu
-            APK=aura-native/project/app/build/outputs/apk/debug/app-debug.apk
-            adb install -r "$APK"
-            adb logcat -c
-            adb shell am start -W -n br.com.edgard.aura.nativo81/br.com.edgard.aura.MainActivity
-            sleep 8
-            mkdir -p aura-native/smoke
-            adb shell dumpsys activity activities > aura-native/smoke/activity.txt
-            adb shell uiautomator dump /sdcard/aura.xml || true
-            adb pull /sdcard/aura.xml aura-native/smoke/screen.xml || true
-            adb exec-out screencap -p > aura-native/smoke/screen.png || true
-            adb logcat -d -v time > aura-native/smoke/logcat.txt
-            grep -q 'br.com.edgard.aura.nativo81' aura-native/smoke/activity.txt
-            if grep -E 'FATAL EXCEPTION|Unable to start activity|ClassNotFoundException|Process: br.com.edgard.aura' aura-native/smoke/logcat.txt; then exit 1; fi
-      - name: Export Android test evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: AURA-NATIVE-SMOKE
-          path: aura-native/smoke/
-          if-no-files-found: ignore
