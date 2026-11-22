@@ -4,6 +4,9 @@ on:
     branches:
       - aura-native-apk-20261122
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
 permissions:
   contents: read
 jobs:
