@@ -1,15 +1,14 @@
-name: AURA9 Android completo
+name: AURA10 Android Native Core
 on:
   push:
-    branches:
-      - aura9-original-completo-android
+    branches: [aura10-android-corrigido-20261122]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  build-apk:
+  apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Java 17
@@ -17,7 +16,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Android SDK platform
+      - name: Android SDK platform
         run: |
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
           test -x "$SDKMANAGER"
@@ -26,35 +25,43 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Extract preserved original UI and Android source
+      - name: Unpack Android source
         run: |
-          mkdir -p aura9-project
-          unzip -q aura9-source.zip -d aura9-project
-          test -s aura9-project/app/src/main/assets/aura.html
-          test -s aura9-project/app/src/main/assets/native-ui.js
-          test -s aura9-project/app/src/main/java/br/com/edgard/aura/AudioService.java
-          test $(wc -c < aura9-project/app/src/main/assets/aura.html) -gt 1800000
-      - name: Test PCM core, tempo and overlap
-        run: bash tests/run-core-tests.sh
-        working-directory: aura9-project
-      - name: Compile Android APK
+          mkdir -p aura10-project
+          unzip -q aura10-source.zip -d aura10-project
+          test $(wc -c < aura10-project/app/src/main/assets/aura.html) -gt 1800000
+      - name: Test Android mixer and JavaScript
+        working-directory: aura10-project
+        run: |
+          bash tests/run-core-tests.sh
+          node --check app/src/main/assets/native-ui.js
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('app/src/main/java/br/com/edgard/aura/SessionStore.java').read_text()
+          assert '.put("tailConfidence",t.tailConfidence)' in s
+          assert '.put("tailPhase",t.tailPhaseSeconds)' in s
+          p=Path('app/src/main/java/br/com/edgard/aura/MainActivity.java').read_text()
+          assert 'nativeFileSelect||list.isEmpty()' in p
+          assert 'Math.min(2,list.size())' in p
+          assert 'public String snapshot()' in p
+          assert 'AURA_ANDROID' in p
+          print("PASS native integration invariants")
+          PY
+      - name: Compile signed APK
+        working-directory: aura10-project
         run: gradle --no-daemon assembleDebug
-        working-directory: aura9-project
-      - name: Verify signature, original UI and native mixer in APK
+      - name: Verify signature, assets and package
         run: |
           set -eu
-          APK=aura9-project/app/build/outputs/apk/debug/app-debug.apk
-          test -s "$APK"
+          APK=aura10-project/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F 'br.com.edgard.aura.completo9'
-          unzip -l "$APK" | grep -F 'assets/aura.html'
-          unzip -l "$APK" | grep -F 'assets/native-ui.js'
-          unzip -p "$APK" assets/aura.html | grep -Fq 'aura-portable-seed'
-          unzip -p "$APK" assets/native-ui.js | grep -Fq 'aura9-native-controller'
-          unzip -l "$APK" | grep -F 'classes.dex'
-      - name: Upload signed installable Android app
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F br.com.edgard.aura.completo10
+          unzip -l "$APK" | grep -F assets/aura.html
+          unzip -p "$APK" assets/native-ui.js | grep -Fq aura10-native-controller
+          unzip -p "$APK" assets/aura.html | grep -Fq aura-portable-seed
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EDGARD-AURA9-ANDROID-COMPLETO
-          path: aura9-project/app/build/outputs/apk/debug/app-debug.apk
+          name: EDGARD-AURA10-ANDROID-APK
+          path: aura10-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
