@@ -42,6 +42,37 @@ jobs:
       - name: Compile signed debug APK
         run: gradle --no-daemon assembleDebug
         working-directory: aura-native/project
+      - name: Android emulator install and app-launch smoke test
+        id: emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          profile: pixel_3a
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -eu
+            APK=aura-native/project/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell am start -W -n br.com.edgard.aura/.MainActivity
+            sleep 8
+            mkdir -p aura-native/smoke
+            adb shell dumpsys activity activities > aura-native/smoke/activity.txt
+            adb shell uiautomator dump /sdcard/aura.xml || true
+            adb pull /sdcard/aura.xml aura-native/smoke/screen.xml || true
+            adb exec-out screencap -p > aura-native/smoke/screen.png || true
+            adb logcat -d -v time > aura-native/smoke/logcat.txt
+            grep -q 'br.com.edgard.aura' aura-native/smoke/activity.txt
+            if grep -E 'FATAL EXCEPTION|Unable to start activity|ClassNotFoundException|Process: br.com.edgard.aura' aura-native/smoke/logcat.txt; then exit 1; fi
+      - name: Export Android test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AURA-NATIVE-SMOKE
+          path: aura-native/smoke/
+          if-no-files-found: ignore
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
