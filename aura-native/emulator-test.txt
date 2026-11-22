@@ -1,0 +1,1 @@
+Teste de instalação e abertura Android, sem alterações ao aplicativo principal.
