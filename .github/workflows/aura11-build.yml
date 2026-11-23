@@ -1,14 +1,14 @@
-name: EDGARD AURA11 Android
+name: EDGARD AURA 11.1.1 Android — audited build
 on:
   push:
-    branches: [aura11-android-reproducao-imediata]
+    branches: [aura11-1-1-apk-auditado]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Java 17
@@ -16,59 +16,52 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Android SDK platform
+      - name: Android SDK 35
         run: |
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
           test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Unpack AURA11 source
+      - name: Assemble audited sources from verified base and overlay
         run: |
+          set -euo pipefail
+          echo "10d02c598c63be65c8ef473adcefc0a434ba418f5cc50eb1251cd8ab25dbe28f  aura11-source.zip" | sha256sum -c -
+          base64 -d aura11-111/overlay.zip.base64 > /tmp/aura11-overlay.zip
+          echo "fa130f7b1d3e217f648828148fb88e7cac356bf643ce8010a53b73dbb00f04ef  /tmp/aura11-overlay.zip" | sha256sum -c -
           mkdir -p aura11-project
           unzip -q aura11-source.zip -d aura11-project
-          test -s aura11-project/app/src/main/assets/aura-fast.html
-          test -s aura11-project/app/src/main/assets/aura.html
-          test -s aura11-project/app/src/main/java/br/com/edgard/aura/QuickMixService.java
-          test $(wc -c < aura11-project/app/src/main/assets/aura-fast.html) -lt 150000
-          test $(wc -c < aura11-project/app/src/main/assets/aura.html) -gt 1800000
-      - name: Test PCM and Android JavaScript UI
+          unzip -q -o /tmp/aura11-overlay.zip -d aura11-project
+          grep -Fq "11.1.1-audit-beta" aura11-project/app/build.gradle
+          test -s aura11-project/app/src/main/java/br/com/edgard/aura/QuickAudioAnalysis.java
+          test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/QuickBeatGrid.java
+      - name: Run core and simulated playback tests
         working-directory: aura11-project
         run: |
-          bash tests/run-core-tests.sh
+          bash tests/run-audit-tests.sh
           node --check app/src/main/assets/native-ui.js
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          orig=Path('app/src/main/assets/aura.html').read_text()
-          fast=Path('app/src/main/assets/aura-fast.html').read_text()
-          main=Path('app/src/main/java/br/com/edgard/aura/MainActivity.java').read_text()
-          qs=Path('app/src/main/java/br/com/edgard/aura/QuickMixService.java').read_text()
-          assert len(re.findall(r'<script\b',fast,re.I))==0
-          assert 'QuickMixService.START' in main
-          assert 'MediaPlayer' in qs and 'setOnPreparedListener' in qs
-          assert 'getCurrentPosition()' in qs and 'startFade(' in qs
-          assert 'aura-portable-seed' in orig
-          print('PASS source URI audio and independent original UI')
-          PY
-      - name: Compile APK
-        run: gradle --no-daemon assembleDebug
+      - name: Build signed debug APK
         working-directory: aura11-project
-      - name: Verify signed APK and full original UI
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+      - name: Verify APK signature and packaged UI
         run: |
-          set -eu
+          set -euo pipefail
           APK=aura11-project/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F br.com.edgard.aura.completo11
-          unzip -l "$APK" | grep -F assets/aura.html
-          unzip -l "$APK" | grep -F assets/aura-fast.html
-          unzip -l "$APK" | grep -F assets/native-ui.js
-          unzip -l "$APK" | grep -F classes.dex
-      - name: Upload APK
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "br.com.edgard.aura.completo11"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "11.1.1-audit-beta"
+          unzip -l "$APK" | grep -F "assets/aura.html"
+          unzip -l "$APK" | grep -F "assets/aura-fast.html"
+          unzip -l "$APK" | grep -F "assets/native-ui.js"
+          unzip -l "$APK" | grep -F "classes.dex"
+          sha256sum "$APK"
+      - name: Upload AURA 11.1.1 APK
         uses: actions/upload-artifact@v4
         with:
-          name: EDGARD-AURA11-ANDROID
+          name: EDGARD-AURA11-1-1-APK-AUDITADO
           path: aura11-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 14
