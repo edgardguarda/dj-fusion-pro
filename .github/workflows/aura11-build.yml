@@ -70,7 +70,7 @@ jobs:
           gzip -dc /tmp/aura1119.patch.gz > /tmp/aura1119.patch
           echo 'c606c803f7346bc6bc6a2ac12fc36ce2fba072cd769ba10fa675112f0eba7b9a  /tmp/aura1119.patch' | sha256sum -c -
           (cd aura11-project && patch --batch -p1 < /tmp/aura1119.patch)
-          grep -Fq '11.2.0-master-headroom-beta' aura11-project/app/build.gradle
+          grep -Fq '11.1.9-master-headroom-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/LookaheadMasterLimiter.java
           test -s aura11-project/tests/MasterOutputRegressionTest.java
           base64 -d aura11-120/patch.gz.base64 > /tmp/aura1120.patch.gz
