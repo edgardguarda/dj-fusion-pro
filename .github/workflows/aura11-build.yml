@@ -116,7 +116,11 @@ jobs:
           test -s aura11-project/tests/HandoffRaceAndCacheIntegrityTest.java
           base64 -d aura11-126/output-safety.patch.gz.base64 > /tmp/aura1126.patch.gz
           echo 'd764bd68f6a3130e80349096bac6068bfecdc5fe06262db0e27e27a419f16645  /tmp/aura1126.patch.gz' | sha256sum -c -
-          (cd aura11-project && gzip -dc /tmp/aura1126.patch.gz | patch --batch -p1)
+          # 11.2.4's CI reconstruction intentionally omits the local-only
+          # security checker, using equivalent inline assertions instead.
+          gzip -dc /tmp/aura1126.patch.gz > /tmp/aura1126-full.patch
+          sed '/^--- a\/tests\/check-security-release.py/,$d' /tmp/aura1126-full.patch > /tmp/aura1126.patch
+          (cd aura11-project && patch --batch -p1 < /tmp/aura1126.patch)
           sed -i 's/versionCode 1125/versionCode 1126/' aura11-project/app/build.gradle
           grep -Fq 'versionCode 1126' aura11-project/app/build.gradle
           grep -Fq '11.2.6-output-safety-beta' aura11-project/app/build.gradle
