@@ -1,7 +1,7 @@
-name: EDGARD AURA11 11.1.5 PCM Buffered AudioTrack + Android smoke
+name: EDGARD AURA11 11.1.6 PCM glitch recovery + Android smoke
 on:
   push:
-    branches: [aura11-1-5-pcm-buffer-20261124]
+    branches: [aura11-1-6-pcm-stability-20261124]
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,7 +25,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Assemble AURA 11.1.5 from verified base and patches
+      - name: Assemble AURA 11.1.6 from verified base and patches
         run: |
           set -euo pipefail
           echo '10d02c598c63be65c8ef473adcefc0a434ba418f5cc50eb1251cd8ab25dbe28f  aura11-source.zip' | sha256sum -c -
@@ -46,7 +46,13 @@ jobs:
           base64 -d aura11-115/patch.zip.base64 > /tmp/aura1115.zip
           echo '9754caaeb73cbbd2c0c70f3b8decd808124898875dd666d3884c2703598d062d  /tmp/aura1115.zip' | sha256sum -c -
           unzip -q -o /tmp/aura1115.zip -d aura11-project
-          grep -Fq "11.1.5-pcm-buffer-beta" aura11-project/app/build.gradle
+          base64 -d aura11-116/patch.gz.base64 > /tmp/aura1116.patch.gz
+          echo '973489e06935e078357391c290b3c65234ab1a8a0510745aa23fd705030b4f50  /tmp/aura1116.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/aura1116.patch.gz > /tmp/aura1116.patch
+          echo '76a4200792690cd1ea843145352af9e980873afecfc8a33829447cd1d2ab26d3  /tmp/aura1116.patch' | sha256sum -c -
+          (cd aura11-project && patch --batch -p1 < /tmp/aura1116.patch)
+          test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/PcmGlitchGuard.java
+          grep -Fq "11.1.6-pcm-stability-beta" aura11-project/app/build.gradle
           test -s aura11-project/app/src/debug/java/br/com/edgard/aura/DebugSmokeActivity.java
       - name: Unit + integration model tests
         working-directory: aura11-project
@@ -64,7 +70,7 @@ jobs:
           APK=aura11-project/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F 'br.com.edgard.aura.completo11'
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.1.5-pcm-buffer-beta'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.1.6-pcm-stability-beta'
           unzip -l "$APK" | grep -F 'assets/aura.html'
           unzip -l "$APK" | grep -F 'assets/aura-fast.html'
           unzip -l "$APK" | grep -F 'assets/native-ui.js'
@@ -73,7 +79,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EDGARD-AURA11-1-5-PCM-APK
+          name: EDGARD-AURA11-1-6-PCM-APK
           path: aura11-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -85,7 +91,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-1-5-PCM-APK
+          name: EDGARD-AURA11-1-6-PCM-APK
           path: aura11-apk
       - name: Configure KVM access
         run: |
@@ -132,7 +138,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-1-5-PCM-APK
+          name: EDGARD-AURA11-1-6-PCM-APK
           path: aura11-apk
       - name: Configure KVM access
         run: sudo chmod 666 /dev/kvm || true
@@ -163,6 +169,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AURA11-1-5-PCM-EMULATOR-EVIDENCE
+          name: AURA11-1-6-PCM-EMULATOR-EVIDENCE
           path: pcm-smoke/
           if-no-files-found: ignore
