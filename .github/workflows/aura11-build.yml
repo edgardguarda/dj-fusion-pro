@@ -83,7 +83,7 @@ jobs:
           echo '0d5984288f40fe7a0f1f3f7bb34599dee6ebfd6e5c7c86452218f4e827c7ae6f  /tmp/aura1121.patch.gz' | sha256sum -c -
           gzip -dc /tmp/aura1121.patch.gz > /tmp/aura1121.patch
           (cd aura11-project && patch --batch -p1 < /tmp/aura1121.patch)
-          grep -Fq '11.2.2-auto-recovery-beta' aura11-project/app/build.gradle
+          grep -Fq '11.2.1-recovery-focus-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/PcmHandoffWatchdog.java
           test -s aura11-project/tests/PcmHandoffWatchdogTest.java
           python3 aura11-121/postfix.py aura11-project
