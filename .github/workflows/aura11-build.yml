@@ -86,6 +86,7 @@ jobs:
           grep -Fq '11.2.1-recovery-focus-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/PcmHandoffWatchdog.java
           test -s aura11-project/tests/PcmHandoffWatchdogTest.java
+          python3 aura11-121/postfix.py aura11-project
       - name: Unit + integration model tests
         working-directory: aura11-project
         run: |
