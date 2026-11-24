@@ -54,7 +54,7 @@ jobs:
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/PcmGlitchGuard.java
           grep -Fq "11.1.6-pcm-stability-beta" aura11-project/app/build.gradle
           base64 -d aura11-117/patch.zip.base64 > /tmp/aura1117.zip
-          echo '5012c94c457f5a3e7d9a621a813908bd8d25c41ceeb650bdbf985156bdd297d5  /tmp/aura1117.zip' | sha256sum -c -
+          echo 'a74f1bbf015935a6a0749820e166488530d05a856e4aac3f80fe8d7b269f63ea  /tmp/aura1117.zip' | sha256sum -c -
           unzip -q -o /tmp/aura1117.zip -d aura11-project
           grep -Fq '11.1.7-sync-dsp-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/WsolaStereoStretch.java
