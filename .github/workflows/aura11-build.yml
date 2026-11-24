@@ -1,7 +1,7 @@
-name: EDGARD AURA 11.1.1 Android — audited build
+name: EDGARD AURA11 11.1.2 Stability + Android smoke
 on:
   push:
-    branches: [aura11-1-1-apk-auditado]
+    branches: [aura11-1-2-estabilidade]
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,57 +11,103 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Android SDK 35
+      - name: Android SDK platform 35
         run: |
+          set -euo pipefail
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
           test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0"
-      - name: Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Assemble audited sources from verified base and overlay
+      - name: Assemble AURA 11.1.2 source from verified base and patches
         run: |
           set -euo pipefail
-          echo "10d02c598c63be65c8ef473adcefc0a434ba418f5cc50eb1251cd8ab25dbe28f  aura11-source.zip" | sha256sum -c -
-          base64 -d aura11-111/overlay.zip.base64 > /tmp/aura11-overlay.zip
-          echo "fa130f7b1d3e217f648828148fb88e7cac356bf643ce8010a53b73dbb00f04ef  /tmp/aura11-overlay.zip" | sha256sum -c -
+          echo '10d02c598c63be65c8ef473adcefc0a434ba418f5cc50eb1251cd8ab25dbe28f  aura11-source.zip' | sha256sum -c -
+          base64 -d aura11-111/overlay.zip.base64 > /tmp/aura1111.zip
+          echo 'fa130f7b1d3e217f648828148fb88e7cac356bf643ce8010a53b73dbb00f04ef  /tmp/aura1111.zip' | sha256sum -c -
+          base64 -d aura11-112/patch.zip.base64 > /tmp/aura1112.zip
+          echo '88daecaef4f807f354fa78f9cc8ab909e0b34cd1b74f43f1f5385d7706a765a4  /tmp/aura1112.zip' | sha256sum -c -
           mkdir -p aura11-project
           unzip -q aura11-source.zip -d aura11-project
-          unzip -q -o /tmp/aura11-overlay.zip -d aura11-project
-          grep -Fq "11.1.1-audit-beta" aura11-project/app/build.gradle
-          test -s aura11-project/app/src/main/java/br/com/edgard/aura/QuickAudioAnalysis.java
-          test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/QuickBeatGrid.java
-      - name: Run core and simulated playback tests
+          unzip -q -o /tmp/aura1111.zip -d aura11-project
+          unzip -q -o /tmp/aura1112.zip -d aura11-project
+          grep -Fq "11.1.2-stability-beta" aura11-project/app/build.gradle
+          test -s aura11-project/app/src/debug/java/br/com/edgard/aura/DebugSmokeActivity.java
+      - name: Unit + integration model tests
         working-directory: aura11-project
         run: |
+          set -euo pipefail
           bash tests/run-audit-tests.sh
           node --check app/src/main/assets/native-ui.js
-      - name: Build signed debug APK
-        working-directory: aura11-project
+      - name: Compile signed Android debug APK
         run: gradle --no-daemon :app:assembleDebug --stacktrace
-      - name: Verify APK signature and packaged UI
+        working-directory: aura11-project
+      - name: Verify signature, manifest and bundled UI
         run: |
           set -euo pipefail
           APK=aura11-project/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "br.com.edgard.aura.completo11"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "11.1.1-audit-beta"
-          unzip -l "$APK" | grep -F "assets/aura.html"
-          unzip -l "$APK" | grep -F "assets/aura-fast.html"
-          unzip -l "$APK" | grep -F "assets/native-ui.js"
-          unzip -l "$APK" | grep -F "classes.dex"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F 'br.com.edgard.aura.completo11'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.1.2-stability-beta'
+          unzip -l "$APK" | grep -F 'assets/aura.html'
+          unzip -l "$APK" | grep -F 'assets/aura-fast.html'
+          unzip -l "$APK" | grep -F 'assets/native-ui.js'
+          unzip -l "$APK" | grep -F 'classes.dex'
           sha256sum "$APK"
-      - name: Upload AURA 11.1.1 APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EDGARD-AURA11-1-1-APK-AUDITADO
+          name: EDGARD-AURA11-1-2-STABILITY-APK
           path: aura11-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+  android-smoke:
+    needs: apk
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: EDGARD-AURA11-1-2-STABILITY-APK
+          path: aura11-apk
+      - name: Boot Android emulator and exercise real MediaPlayer handoff
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            set -euo pipefail
+            mkdir -p android-smoke
+            adb install -r aura11-apk/app-debug.apk
+            adb logcat -c
+            adb shell am start -W -n br.com.edgard.aura.completo11/br.com.edgard.aura.DebugSmokeActivity
+            sleep 19
+            adb exec-out run-as br.com.edgard.aura.completo11 cat shared_prefs/aura.xml > android-smoke/aura-state.xml
+            adb logcat -d -v time > android-smoke/logcat.txt
+            python3 - <<'PY'
+            import xml.etree.ElementTree as ET
+            r=ET.parse('android-smoke/aura-state.xml').getroot()
+            fields={e.attrib.get('name'):e.attrib.get('value', e.text or '') for e in r}
+            assert fields.get('smokeCheck')=='fixtures-created',fields
+            assert int(fields.get('dj_index','-1')) >= 1,fields
+            assert fields.get('dj_mode') in {'playing','mixing'},fields
+            print('ANDROID INTEGRATION PASS: real MediaPlayer advanced to song',fields['dj_index'], 'state=',fields['dj_mode'])
+            PY
+            ! grep -q 'FATAL EXCEPTION' android-smoke/logcat.txt
+      - name: Export evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AURA11-1-2-ANDROID-SMOKE-EVIDENCE
+          path: android-smoke/
+          if-no-files-found: ignore
