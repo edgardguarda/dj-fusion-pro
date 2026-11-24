@@ -1,7 +1,7 @@
-name: EDGARD AURA11 11.1.4 Beatmatch Safety + Android smoke
+name: EDGARD AURA11 11.1.5 Beatmatch Safety + Android smoke
 on:
   push:
-    branches: [aura11-1-4-mix-safety-20261124]
+    branches: [aura11-1-5-mix-safety-20261124]
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,7 +25,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Assemble AURA 11.1.4 from verified base and patches
+      - name: Assemble AURA 11.1.5 from verified base and patches
         run: |
           set -euo pipefail
           echo '10d02c598c63be65c8ef473adcefc0a434ba418f5cc50eb1251cd8ab25dbe28f  aura11-source.zip' | sha256sum -c -
@@ -43,13 +43,17 @@ jobs:
           base64 -d aura11-114/patch.zip.base64 > /tmp/aura1114.zip
           echo '81da749185306ac5d4700a3ac997470baf86c6007c47a60bc58d859faf07e543  /tmp/aura1114.zip' | sha256sum -c -
           unzip -q -o /tmp/aura1114.zip -d aura11-project
-          grep -Fq "11.1.4-safety-beta" aura11-project/app/build.gradle
+          base64 -d aura11-115/patch.zip.base64 > /tmp/aura1115.zip
+          echo 'c5869a5da7f3cd512a25448b1512db7a720e66a01876df6a657c87f0ddb02ed7  /tmp/aura1115.zip' | sha256sum -c -
+          unzip -q -o /tmp/aura1115.zip -d aura11-project
+          grep -Fq "11.1.5-pcm-buffer-beta" aura11-project/app/build.gradle
           test -s aura11-project/app/src/debug/java/br/com/edgard/aura/DebugSmokeActivity.java
       - name: Unit + integration model tests
         working-directory: aura11-project
         run: |
           set -euo pipefail
           bash tests/run-audit-tests.sh
+          bash tests/run-pcm-buffer-tests.sh
           node --check app/src/main/assets/native-ui.js
       - name: Compile signed Android debug APK
         run: gradle --no-daemon :app:assembleDebug --stacktrace
@@ -60,7 +64,7 @@ jobs:
           APK=aura11-project/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F 'br.com.edgard.aura.completo11'
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.1.4-safety-beta'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.1.5-safety-beta'
           unzip -l "$APK" | grep -F 'assets/aura.html'
           unzip -l "$APK" | grep -F 'assets/aura-fast.html'
           unzip -l "$APK" | grep -F 'assets/native-ui.js'
@@ -69,7 +73,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EDGARD-AURA11-1-4-STABILITY-APK
+          name: EDGARD-AURA11-1-5-PCM-APK
           path: aura11-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -81,7 +85,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-1-4-STABILITY-APK
+          name: EDGARD-AURA11-1-5-PCM-APK
           path: aura11-apk
       - name: Configure KVM access
         run: |
@@ -116,6 +120,49 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AURA11-1-4-ANDROID-SMOKE-EVIDENCE
+          name: AURA11-1-5-ANDROID-SMOKE-EVIDENCE
           path: android-smoke/
+          if-no-files-found: ignore
+
+  pcm-smoke:
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: EDGARD-AURA11-1-5-PCM-APK
+          path: aura11-apk
+      - name: Configure KVM access
+        run: sudo chmod 666 /dev/kvm || true
+      - name: Boot Android emulator and exercise AudioTrack PCM mixer
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            set -euo pipefail
+            mkdir -p pcm-smoke
+            adb install -r aura11-apk/app-debug.apk
+            adb logcat -c
+            adb shell am start -W -n br.com.edgard.aura.completo11/br.com.edgard.aura.DebugPcmSmokeActivity
+            sleep 24
+            adb exec-out run-as br.com.edgard.aura.completo11 cat shared_prefs/aura.xml > pcm-smoke/aura-state.xml
+            adb logcat -d -v time > pcm-smoke/logcat.txt
+            cat pcm-smoke/aura-state.xml
+            grep -Fq 'name="smokePCM">fixtures-created' pcm-smoke/aura-state.xml
+            grep -Eq '<int name="dj_index" value="[2-9][0-9]*"' pcm-smoke/aura-state.xml
+            grep -Eq '<long name="pcm_output_frames" value="[1-9][0-9]*"' pcm-smoke/aura-state.xml
+            ! grep -q 'FATAL EXCEPTION' pcm-smoke/logcat.txt
+            echo 'PASS Android PCM two-deck AudioTrack service: 3 synthetic local tracks'
+      - name: Export PCM smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AURA11-1-5-PCM-EMULATOR-EVIDENCE
+          path: pcm-smoke/
           if-no-files-found: ignore
