@@ -1,7 +1,7 @@
-name: EDGARD AURA11 11.2.3 Security + privacy + Android smoke
+name: EDGARD AURA11 11.2.4 Async handoff + reliable WAV + Android smoke
 on:
   push:
-    branches: [aura11-1-2-3-security-gates-20261124]
+    branches: [aura11-1-2-4-async-handoff-20261124]
   workflow_dispatch:
 permissions:
   contents: read
@@ -97,8 +97,14 @@ jobs:
           echo '9620e52514a964b7a9e53dfd0633b0044140d6f87a765ed2ea8fbc8538fa0ab6  /tmp/aura1123.patch.gz' | sha256sum -c -
           gzip -dc /tmp/aura1123.patch.gz > /tmp/aura1123.patch
           (cd aura11-project && patch --batch -p1 < /tmp/aura1123.patch)
-          grep -Fq '11.2.3-security-gates-beta' aura11-project/app/build.gradle
+          grep -Fq '11.2.4-async-handoff-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/PrivateAudioExport.java
+          base64 -d aura11-124/patch.gz.base64 > /tmp/aura1124.patch.gz
+          echo 'da251f58d7298c8d7550c25a4b988f5c704c1178c05f05f0bbe01768e702acfc  /tmp/aura1124.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/aura1124.patch.gz > /tmp/aura1124.patch
+          (cd aura11-project && patch --batch -p1 < /tmp/aura1124.patch)
+          grep -Fq '11.2.4-async-handoff-beta' aura11-project/app/build.gradle
+          test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/AsyncDeckPreparer.java
       - name: Unit + integration model tests
         working-directory: aura11-project
         run: |
@@ -107,6 +113,8 @@ jobs:
           bash tests/run-pcm-buffer-tests.sh
           bash tests/run-pro-dsp-tests.sh
           bash tests/run-auto-recovery-tests.sh
+          bash tests/run-security-reliability-tests.sh
+          bash tests/run-audio-safety-tests.sh
           python3 - <<'PY'
           from pathlib import Path
           m=Path('app/src/main/AndroidManifest.xml').read_text()
@@ -131,7 +139,7 @@ jobs:
           APK=aura11-project/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F 'br.com.edgard.aura.completo11'
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.2.3-security-gates-beta'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.2.4-async-handoff-beta'
           unzip -l "$APK" | grep -F 'assets/aura.html'
           unzip -l "$APK" | grep -F 'assets/aura-fast.html'
           unzip -l "$APK" | grep -F 'assets/native-ui.js'
@@ -141,7 +149,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EDGARD-AURA11-2-3-SECURITY-APK
+          name: EDGARD-AURA11-2-4-SECURITY-APK
           path: aura11-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -153,7 +161,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-2-3-SECURITY-APK
+          name: EDGARD-AURA11-2-4-SECURITY-APK
           path: aura11-apk
       - name: Configure KVM access
         run: |
@@ -208,7 +216,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-2-3-SECURITY-APK
+          name: EDGARD-AURA11-2-4-SECURITY-APK
           path: aura11-apk
       - name: Configure KVM access
         run: sudo chmod 666 /dev/kvm || true
@@ -251,7 +259,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-2-3-SECURITY-APK
+          name: EDGARD-AURA11-2-4-SECURITY-APK
           path: aura11-apk
       - name: Configure KVM access
         run: sudo chmod 666 /dev/kvm || true
@@ -297,7 +305,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-2-3-SECURITY-APK
+          name: EDGARD-AURA11-2-4-SECURITY-APK
           path: aura11-apk
       - name: Configure KVM access
         run: sudo chmod 666 /dev/kvm || true
