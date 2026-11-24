@@ -111,7 +111,7 @@ jobs:
           APK=aura11-project/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F 'br.com.edgard.aura.completo11'
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.2.1-recovery-focus-beta'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.2.2-auto-recovery-beta'
           unzip -l "$APK" | grep -F 'assets/aura.html'
           unzip -l "$APK" | grep -F 'assets/aura-fast.html'
           unzip -l "$APK" | grep -F 'assets/native-ui.js'
