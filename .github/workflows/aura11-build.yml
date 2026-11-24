@@ -69,7 +69,7 @@ jobs:
           retention-days: 14
   android-smoke:
     needs: apk
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -77,6 +77,10 @@ jobs:
         with:
           name: EDGARD-AURA11-1-2-STABILITY-APK
           path: aura11-apk
+      - name: Configure KVM access
+        run: |
+          sudo chmod 666 /dev/kvm || true
+          ls -l /dev/kvm || true
       - name: Boot Android emulator and exercise real MediaPlayer handoff
         uses: reactivecircus/android-emulator-runner@v2
         with:
