@@ -1,7 +1,7 @@
-name: EDGARD AURA11 11.1.5 Beatmatch Safety + Android smoke
+name: EDGARD AURA11 11.1.5 PCM Buffered AudioTrack + Android smoke
 on:
   push:
-    branches: [aura11-1-5-mix-safety-20261124]
+    branches: [aura11-1-5-pcm-buffer-20261124]
   workflow_dispatch:
 permissions:
   contents: read
