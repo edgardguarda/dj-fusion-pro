@@ -106,7 +106,7 @@ jobs:
           # verified reconstruction uses equivalent inline security assertions.
           sed '/^--- a\/tests\/check-security-release.py/,$d' /tmp/aura1124-source.patch > /tmp/aura1124.patch
           (cd aura11-project && patch --batch -p1 < /tmp/aura1124.patch)
-          grep -Fq '11.2.5-reliability-gates-beta' aura11-project/app/build.gradle
+          grep -Fq '11.2.4-async-handoff-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/AsyncDeckPreparer.java
           base64 -d aura11-125/reliability.patch.gz.base64 > /tmp/aura1125.patch.gz
           echo 'b0d70fe7f42c9557c2589e3049051cff856c376f5e0d32f900ee7c0214662cb6  /tmp/aura1125.patch.gz' | sha256sum -c -
