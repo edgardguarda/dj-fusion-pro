@@ -1,7 +1,7 @@
-name: EDGARD AURA11 11.2.4 Async handoff + reliable WAV + Android smoke
+name: EDGARD AURA11 11.2.5 Reliability gates + Android smoke
 on:
   push:
-    branches: [aura11-1-2-4-async-handoff-20261124]
+    branches: [aura11-1-2-5-reliability-gates-20261124]
   workflow_dispatch:
 permissions:
   contents: read
@@ -106,8 +106,14 @@ jobs:
           # verified reconstruction uses equivalent inline security assertions.
           sed '/^--- a\/tests\/check-security-release.py/,$d' /tmp/aura1124-source.patch > /tmp/aura1124.patch
           (cd aura11-project && patch --batch -p1 < /tmp/aura1124.patch)
-          grep -Fq '11.2.4-async-handoff-beta' aura11-project/app/build.gradle
+          grep -Fq '11.2.5-reliability-gates-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/AsyncDeckPreparer.java
+          base64 -d aura11-125/reliability.patch.gz.base64 > /tmp/aura1125.patch.gz
+          echo 'b0d70fe7f42c9557c2589e3049051cff856c376f5e0d32f900ee7c0214662cb6  /tmp/aura1125.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/aura1125.patch.gz > /tmp/aura1125.patch
+          (cd aura11-project && patch --batch -p1 < /tmp/aura1125.patch)
+          grep -Fq '11.2.5-reliability-gates-beta' aura11-project/app/build.gradle
+          test -s aura11-project/tests/HandoffRaceAndCacheIntegrityTest.java
       - name: Unit + integration model tests
         working-directory: aura11-project
         run: |
@@ -141,7 +147,7 @@ jobs:
           APK=aura11-project/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F 'br.com.edgard.aura.completo11'
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.2.4-async-handoff-beta'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.2.5-reliability-gates-beta'
           unzip -l "$APK" | grep -F 'assets/aura.html'
           unzip -l "$APK" | grep -F 'assets/aura-fast.html'
           unzip -l "$APK" | grep -F 'assets/native-ui.js'
@@ -151,7 +157,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EDGARD-AURA11-2-4-SECURITY-APK
+          name: EDGARD-AURA11-2-5-RELIABILITY-APK
           path: aura11-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -163,7 +169,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-2-4-SECURITY-APK
+          name: EDGARD-AURA11-2-5-RELIABILITY-APK
           path: aura11-apk
       - name: Configure KVM access
         run: |
@@ -218,7 +224,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-2-4-SECURITY-APK
+          name: EDGARD-AURA11-2-5-RELIABILITY-APK
           path: aura11-apk
       - name: Configure KVM access
         run: sudo chmod 666 /dev/kvm || true
@@ -261,7 +267,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-2-4-SECURITY-APK
+          name: EDGARD-AURA11-2-5-RELIABILITY-APK
           path: aura11-apk
       - name: Configure KVM access
         run: sudo chmod 666 /dev/kvm || true
@@ -289,6 +295,7 @@ jobs:
             grep -Eq 'name="pcm_pitch_preserving" value="true"' sync-smoke/state.xml
             grep -Fq 'name="pcm_master_peak_dbfs"' sync-smoke/state.xml
             grep -Fq 'name="pcm_phase_error_ms"' sync-smoke/state.xml
+            grep -Fq 'name="pcm_android_output_underruns"' sync-smoke/state.xml
             ! grep -q 'FATAL EXCEPTION' sync-smoke/logcat.txt
             echo 'PASS Android WSOLA source mixing, PCM meters and 2 track transitions'
       - name: Export sync smoke evidence
@@ -307,7 +314,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EDGARD-AURA11-2-4-SECURITY-APK
+          name: EDGARD-AURA11-2-5-RELIABILITY-APK
           path: aura11-apk
       - name: Configure KVM access
         run: sudo chmod 666 /dev/kvm || true
