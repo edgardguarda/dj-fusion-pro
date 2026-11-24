@@ -117,6 +117,8 @@ jobs:
           base64 -d aura11-126/output-safety.patch.gz.base64 > /tmp/aura1126.patch.gz
           echo 'd764bd68f6a3130e80349096bac6068bfecdc5fe06262db0e27e27a419f16645  /tmp/aura1126.patch.gz' | sha256sum -c -
           (cd aura11-project && gzip -dc /tmp/aura1126.patch.gz | patch --batch -p1)
+          sed -i 's/versionCode 1125/versionCode 1126/' aura11-project/app/build.gradle
+          grep -Fq 'versionCode 1126' aura11-project/app/build.gradle
           grep -Fq '11.2.6-output-safety-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/OutputUnderrunGuard.java
           test -s aura11-project/tests/OutputUnderrunGuardTest.java
