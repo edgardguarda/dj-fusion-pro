@@ -97,7 +97,7 @@ jobs:
           echo '9620e52514a964b7a9e53dfd0633b0044140d6f87a765ed2ea8fbc8538fa0ab6  /tmp/aura1123.patch.gz' | sha256sum -c -
           gzip -dc /tmp/aura1123.patch.gz > /tmp/aura1123.patch
           (cd aura11-project && patch --batch -p1 < /tmp/aura1123.patch)
-          grep -Fq '11.2.4-async-handoff-beta' aura11-project/app/build.gradle
+          grep -Fq '11.2.3-security-gates-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/PrivateAudioExport.java
           base64 -d aura11-124/patch.gz.base64 > /tmp/aura1124.patch.gz
           echo 'da251f58d7298c8d7550c25a4b988f5c704c1178c05f05f0bbe01768e702acfc  /tmp/aura1124.patch.gz' | sha256sum -c -
