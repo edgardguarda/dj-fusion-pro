@@ -98,15 +98,11 @@ jobs:
             sleep 19
             adb exec-out run-as br.com.edgard.aura.completo11 cat shared_prefs/aura.xml > android-smoke/aura-state.xml
             adb logcat -d -v time > android-smoke/logcat.txt
-            python3 - <<'PY'
-            import xml.etree.ElementTree as ET
-            r=ET.parse('android-smoke/aura-state.xml').getroot()
-            fields={e.attrib.get('name'):e.attrib.get('value', e.text or '') for e in r}
-            assert fields.get('smokeCheck')=='fixtures-created',fields
-            assert int(fields.get('dj_index','-1')) >= 1,fields
-            assert fields.get('dj_mode') in {'playing','mixing'},fields
-            print('ANDROID INTEGRATION PASS: real MediaPlayer advanced to song',fields['dj_index'], 'state=',fields['dj_mode'])
-            PY
+            cat android-smoke/aura-state.xml
+            grep -Fq 'name="smokeCheck">fixtures-created' android-smoke/aura-state.xml
+            grep -Eq '<int name="dj_index" value="[1-9][0-9]*"' android-smoke/aura-state.xml
+            grep -Eq '<string name="dj_mode">(playing|mixing)</string>' android-smoke/aura-state.xml
+            echo 'PASS Android MediaPlayer: multiple real source WAV tracks advanced successfully'
             ! grep -q 'FATAL EXCEPTION' android-smoke/logcat.txt
       - name: Export evidence
         if: always()
