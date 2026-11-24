@@ -44,7 +44,7 @@ jobs:
           echo '81da749185306ac5d4700a3ac997470baf86c6007c47a60bc58d859faf07e543  /tmp/aura1114.zip' | sha256sum -c -
           unzip -q -o /tmp/aura1114.zip -d aura11-project
           base64 -d aura11-115/patch.zip.base64 > /tmp/aura1115.zip
-          echo 'c5869a5da7f3cd512a25448b1512db7a720e66a01876df6a657c87f0ddb02ed7  /tmp/aura1115.zip' | sha256sum -c -
+          echo '9754caaeb73cbbd2c0c70f3b8decd808124898875dd666d3884c2703598d062d  /tmp/aura1115.zip' | sha256sum -c -
           unzip -q -o /tmp/aura1115.zip -d aura11-project
           grep -Fq "11.1.5-pcm-buffer-beta" aura11-project/app/build.gradle
           test -s aura11-project/app/src/debug/java/br/com/edgard/aura/DebugSmokeActivity.java
