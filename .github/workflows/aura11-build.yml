@@ -153,7 +153,7 @@ jobs:
           echo '831ca4003be2076f47e1a3113f4bc06dd16716e0367cd63f773c5ebf89c400b7  /tmp/aura1130.patch.xz' | sha256sum -c -
           (cd aura11-project && xz -dc /tmp/aura1130.patch.xz | patch --batch -p1)
           grep -Fq 'versionCode 1130' aura11-project/app/build.gradle
-          grep -Fq '11.3.2-egmix-native-samplers-beta' aura11-project/app/build.gradle
+          grep -Fq '11.3.0-native-ux-fx-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/MasterCreativeFx.java
           test -s aura11-project/tests/MasterCreativeFxTest.java
           node --check aura11-project/app/src/main/assets/native-ui.js
