@@ -1,7 +1,7 @@
-name: EG MIX 11.3.2 Native Samplers and UX
+name: EG MIX 11.3.3 Seek and Turntable Scratch
 on:
   push:
-    branches: [eg-mix-11-3-2-native-samplers-20261125]
+    branches: [eg-mix-11-3-3-seek-turntable-20261125]
   workflow_dispatch:
 permissions:
   contents: read
@@ -168,6 +168,22 @@ jobs:
           node --check aura11-project/app/src/main/assets/native-ui.js
           cp aura11-132/PcmSamplerBusTest.java aura11-project/tests/
           (cd aura11-project && javac -encoding UTF-8 -d build-egmix app/src/main/java/br/com/edgard/aura/core/PcmSamplerBus.java tests/PcmSamplerBusTest.java && java -cp build-egmix PcmSamplerBusTest)
+          # Verified delta over the already reconstructed EG MIX 11.3.2.
+          base64 -d egmix-133/seek-turntable.patch.xz.base64 > /tmp/egmix133.patch.xz
+          echo 'cbf4f64df671cb143565aeaf1601f80c9e547d855d590b5a843f576f9b763852  /tmp/egmix133.patch.xz' | sha256sum -c -
+          (cd aura11-project && xz -dc /tmp/egmix133.patch.xz | patch --batch -p1)
+          grep -Fq 'versionCode 1133' aura11-project/app/build.gradle
+          grep -Fq '11.3.3-seek-turntable-beta' aura11-project/app/build.gradle
+          test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/PcmSamplerBus.java
+          grep -Fq 'seekCurrent(positionMs)' aura11-project/app/src/main/java/br/com/edgard/aura/QuickMixService.java
+          grep -Fq 'samplerBus.remember' aura11-project/app/src/main/java/br/com/edgard/aura/AudioService.java
+          # Ship an original offline voice with Edgard (no accented initial E).
+          if ! command -v espeak >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y espeak; fi
+          python3 egmix-133/generate_robot_voice.py aura11-project/app/src/main/assets/samplers/vinheta.wav
+          # Existing 11.3.2 integration tests check version and FX semantics.
+          sed -i 's/1132/1133/g; s/11.3.2-egmix-native-samplers-beta/11.3.3-seek-turntable-beta/g' aura11-project/tests/check-egmix-native.py
+          sed -i 's/1132/1133/g; s/11.3.2-egmix-native-samplers-beta/11.3.3-seek-turntable-beta/g' aura11-project/tests/check-ux-fx.py
+          node --check aura11-project/app/src/main/assets/native-ui.js
       - name: Unit + integration model tests
         working-directory: aura11-project
         run: |
@@ -202,7 +218,7 @@ jobs:
           APK=aura11-project/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F 'br.com.edgard.aura.completo11'
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.3.2-egmix-native-samplers-beta'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F '11.3.3-seek-turntable-beta'
           unzip -l "$APK" | grep -F 'assets/aura.html'
           unzip -l "$APK" | grep -F 'assets/aura-fast.html'
           unzip -l "$APK" | grep -F 'assets/native-ui.js'
@@ -212,7 +228,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EG-MIX-11-3-2-NATIVE-SAMPLERS-APK
+          name: EG-MIX-11-3-3-SEEK-SCRATCH-APK
           path: aura11-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -224,7 +240,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EG-MIX-11-3-2-NATIVE-SAMPLERS-APK
+          name: EG-MIX-11-3-3-SEEK-SCRATCH-APK
           path: aura11-apk
       - name: Configure KVM access
         run: |
@@ -279,7 +295,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EG-MIX-11-3-2-NATIVE-SAMPLERS-APK
+          name: EG-MIX-11-3-3-SEEK-SCRATCH-APK
           path: aura11-apk
       - name: Configure KVM access
         run: sudo chmod 666 /dev/kvm || true
@@ -324,7 +340,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EG-MIX-11-3-2-NATIVE-SAMPLERS-APK
+          name: EG-MIX-11-3-3-SEEK-SCRATCH-APK
           path: aura11-apk
       - name: Configure KVM access
         run: sudo chmod 666 /dev/kvm || true
@@ -371,7 +387,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: EG-MIX-11-3-2-NATIVE-SAMPLERS-APK
+          name: EG-MIX-11-3-3-SEEK-SCRATCH-APK
           path: aura11-apk
       - name: Configure KVM access
         run: sudo chmod 666 /dev/kvm || true
