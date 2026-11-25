@@ -171,7 +171,13 @@ jobs:
           # Verified delta over the already reconstructed EG MIX 11.3.2.
           base64 -d egmix-133/seek-turntable.patch.xz.base64 > /tmp/egmix133.patch.xz
           echo 'cbf4f64df671cb143565aeaf1601f80c9e547d855d590b5a843f576f9b763852  /tmp/egmix133.patch.xz' | sha256sum -c -
-          (cd aura11-project && xz -dc /tmp/egmix133.patch.xz | patch --batch -p1)
+          # The CI-generated 11.3.2 files have different formatting from the
+          # full local source. Apply compatible Java hunks, then normalize
+          # incompatible bus/UI fragments by guarded source anchors.
+          if ! (cd aura11-project && xz -dc /tmp/egmix133.patch.xz | patch --batch -p1); then
+            echo 'Expected CI formatting rejections: applying guarded rebase'
+          fi
+          python3 egmix-133/rebase.py aura11-project
           grep -Fq 'versionCode 1133' aura11-project/app/build.gradle
           grep -Fq '11.3.3-seek-turntable-beta' aura11-project/app/build.gradle
           test -s aura11-project/app/src/main/java/br/com/edgard/aura/core/PcmSamplerBus.java
