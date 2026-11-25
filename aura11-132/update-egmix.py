@@ -25,7 +25,7 @@ edit("app/src/main/AndroidManifest.xml",lambda s:apply(s,[
     ('android:label="Edgard AURA DJ 11"', 'android:label="EG MIX" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"')
 ]))
 def brand(s):
-    return apply(s,[
+    pairs=[
       ("Edgard AutoDJ — AURA 11 ANDROID","EG MIX — Android Nativo"),
       ("EDGARD <b>AUTODJ</b>","EG <b>MIX</b>"),
       ("AURA / 11 · ANDROID NATIVO","PRO DJ / ANDROID NATIVO"),
@@ -34,7 +34,9 @@ def brand(s):
       ("<b>02 · BACKSPIN</b><small>Vinil ao vivo</small>","<b>02 · BACKSPIN</b><small>Padrão club</small>"),
       ("<b>03 · TAPE STOP</b><small>Brake ao vivo</small>","<b>03 · TAPE STOP</b><small>Brake profissional</small>"),
       ("<b>04 · SCRATCH</b><small>Scratch ao vivo</small>","<b>04 · SCRATCH</b><small>Scratch clássico</small>")
-    ])
+    ]
+    for a,b in pairs: s=s.replace(a,b)
+    return s
 edit("app/src/main/assets/aura-fast.html",brand)
 edit("app/src/main/assets/aura.html",lambda s:brand(s).replace('value="70" aria-label="Volume dos samplers"/><output id="samplerVolumeValue">70%</output>', 'value="78" aria-label="Volume dos samplers"/><output id="samplerVolumeValue">78%</output>'))
 # Generate the four pre-existing, original, offline PCM one-shots as Android assets.
