@@ -1,7 +1,7 @@
-name: EG MIX 11.5.0 - APK neural
+name: EG MIX 11.5.1 - APK neural
 on:
   push:
-    branches: [eg-mix-11-5-0-neural-multirate]
+    branches: [eg-mix-11-5-1-smart-studio]
     paths: ['ci-source/**', '.github/workflows/eg-mix-11-4-8-neural.yml']
   workflow_dispatch:
 permissions:
@@ -22,6 +22,8 @@ jobs:
           unzip -oq ci-source/overlay-1149.zip -d build-input/EG_MIX_11_4_8
           echo '0fc1530de3c7bac4d150ced9898f1772e6ea2c7bc2c4a32d3ccd7b5f1aa03502  ci-source/overlay-1150.zip' | sha256sum -c -
           unzip -oq ci-source/overlay-1150.zip -d build-input/EG_MIX_11_4_8
+          echo 'a4b732b7302b1b4b87e0c4c01ef3e33ef74409ec78ed7f5c75926bc8ac47edc4  ci-source/overlay-1151.zip' | sha256sum -c -
+          unzip -oq ci-source/overlay-1151.zip -d build-input/EG_MIX_11_4_8
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -40,7 +42,7 @@ jobs:
       - name: Regression tests
         working-directory: build-input/EG_MIX_11_4_8
         run: |
-          for suite in neural-pipeline native-stem stem-storage egmix security-reliability; do bash tests/run-$suite-tests.sh; done
+          for suite in smart-studio neural-pipeline native-stem stem-storage egmix security-reliability ux-fx; do bash tests/run-$suite-tests.sh; done
           python3 tests/check-all-assets.py
       - name: Prepare verified neural model
         working-directory: build-input/EG_MIX_11_4_8
@@ -58,7 +60,7 @@ jobs:
           sha256sum app-debug.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: EG-MIX-11.5.0-neural-debug-apk
+          name: EG-MIX-11.5.1-neural-debug-apk
           path: |
             build-input/EG_MIX_11_4_8/app/build/outputs/apk/debug/app-debug.apk
             build-input/EG_MIX_11_4_8/app/build/outputs/apk/debug/SHA256SUMS.txt
