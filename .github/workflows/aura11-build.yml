@@ -187,7 +187,6 @@ jobs:
           if ! command -v espeak >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y espeak; fi
           python3 egmix-133/generate_robot_voice.py aura11-project/app/src/main/assets/samplers/vinheta.wav
           # Existing 11.3.2 integration tests check version and FX semantics.
-          sed -i 's/1132/1133/g; s/11.3.2-egmix-native-samplers-beta/11.3.3-seek-turntable-beta/g' aura11-project/tests/check-egmix-native.py
           sed -i 's/1132/1133/g; s/11.3.2-egmix-native-samplers-beta/11.3.3-seek-turntable-beta/g' aura11-project/tests/check-ux-fx.py
           node --check aura11-project/app/src/main/assets/native-ui.js
       - name: Unit + integration model tests
