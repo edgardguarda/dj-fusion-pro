@@ -294,6 +294,13 @@ def ui(s):
 ''' + s[b:]
     return s.replace("AURA Android pronto","EG MIX Android pronto")
 edit("app/src/main/assets/native-ui.js",ui)
+# Re-scope old 11.3.0 safety tests to the newly functional offline native pads.
+edit("tests/check-ux-fx.py",lambda s:apply(s,[
+  ("'inert native samplers disabled': \"pad.disabled=true;pad.title='Sampler WebAudio\" in native,",
+   "'native samplers enabled': \"api.sampler(pad.dataset.sampler\" in native and 'PcmSamplerBus' in service,"),
+  ("'11.3.0-native-ux-fx-beta' in (r/'app/build.gradle').read_text()",
+   "'11.3.2-egmix-native-samplers-beta' in (r/'app/build.gradle').read_text()")
+]))
 # The CI build now contains actual Android code and generated WAVs.
 assert (r/"app/src/main/java/br/com/edgard/aura/core/PcmSamplerBus.java").is_file()
 print("EG MIX 11.3.2 source update applied")
