@@ -1,2 +1,2 @@
-# EG MIX 11.5.1
-Estúdio PCM padrão, análise automática de BPM e Camelot, fila inteligente por entrada e saída, efeitos rítmicos nativos e preparação neural em lote. CI recompõe a fonte verificada.
+# EG MIX 11.5.2
+Análise progressiva, reutilização de cache, transições antes do silêncio final e telemetria real do mixer PCM. CI recompõe fontes verificadas e executa teste Android.

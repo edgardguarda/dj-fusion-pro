@@ -1,7 +1,7 @@
-name: EG MIX 11.5.1 - APK neural
+name: EG MIX 11.5.2 - APK neural
 on:
   push:
-    branches: [eg-mix-11-5-1-smart-studio]
+    branches: [eg-mix-11-5-2-live-recovery]
     paths: ['ci-source/**', '.github/workflows/eg-mix-11-4-8-neural.yml']
   workflow_dispatch:
 permissions:
@@ -26,6 +26,8 @@ jobs:
           unzip -oq ci-source/overlay-1151.zip -d build-input/EG_MIX_11_4_8
           echo 'ace6b9c7f7f0e00c1128f10f56c824219b12545e3c72aa39b857c28ffd2f4824  ci-source/overlay-1151b.zip' | sha256sum -c -
           unzip -oq ci-source/overlay-1151b.zip -d build-input/EG_MIX_11_4_8
+          echo '6d0115d44a0db08888e1c0f1a3db4df554e57c7ee32a6d2a984ecb567afea1be  ci-source/overlay-1152.zip' | sha256sum -c -
+          unzip -oq ci-source/overlay-1152.zip -d build-input/EG_MIX_11_4_8
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -44,7 +46,7 @@ jobs:
       - name: Regression tests
         working-directory: build-input/EG_MIX_11_4_8
         run: |
-          for suite in smart-studio neural-pipeline native-stem stem-storage egmix security-reliability ux-fx; do bash tests/run-$suite-tests.sh; done
+          for suite in live-recovery smart-studio neural-pipeline native-stem stem-storage egmix security-reliability ux-fx; do bash tests/run-$suite-tests.sh; done
           python3 tests/check-all-assets.py
       - name: Prepare verified neural model
         working-directory: build-input/EG_MIX_11_4_8
@@ -62,8 +64,56 @@ jobs:
           sha256sum app-debug.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: EG-MIX-11.5.1-neural-debug-apk
+          name: EG-MIX-11.5.2-neural-debug-apk
           path: |
             build-input/EG_MIX_11_4_8/app/build/outputs/apk/debug/app-debug.apk
             build-input/EG_MIX_11_4_8/app/build/outputs/apk/debug/SHA256SUMS.txt
           if-no-files-found: error
+
+  android-live-smoke:
+    needs: apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: EG-MIX-11.5.2-neural-debug-apk
+          path: live-apk
+      - name: Configure KVM
+        run: sudo chmod 666 /dev/kvm || true
+      - name: Measure actual digital PCM rendering on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            set -euo pipefail
+            mkdir -p live-evidence
+            adb install -r live-apk/app-debug.apk
+            adb logcat -c
+            adb shell am start -W -n br.com.edgard.aura.completo11/br.com.edgard.aura.DebugPcmSmokeActivity
+            sleep 36
+            adb exec-out run-as br.com.edgard.aura.completo11 cat shared_prefs/aura.xml > live-evidence/aura-state.xml
+            adb logcat -d -v time > live-evidence/logcat.txt
+            python3 - <<'PY'
+            import xml.etree.ElementTree as ET
+            a={x.attrib['name']:x.attrib.get('value',x.text) for x in ET.parse('live-evidence/aura-state.xml').getroot()}
+            for k in ['smokePCM','live_fx_frames','live_sampler_frames','live_mixed_frames','live_mixed_transitions','live_hard_handoffs']: print(k,a.get(k))
+            assert a['smokePCM']=='fixtures-created'
+            assert int(a['live_fx_frames'])>4800
+            assert int(a['live_sampler_frames'])>4800
+            assert int(a['live_mixed_frames'])>48000
+            assert int(a['live_mixed_transitions'])>=2
+            assert int(a['live_hard_handoffs'])==0
+            PY
+            ! grep -q 'FATAL EXCEPTION' live-evidence/logcat.txt
+      - name: Upload measured Android evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EG-MIX-11.5.2-live-android-evidence
+          path: live-evidence/
+          if-no-files-found: warn
