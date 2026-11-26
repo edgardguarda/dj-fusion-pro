@@ -1,2 +1,2 @@
-# EG MIX 11.5.4
-Auditoria funcional: correção da divisão e intensidade dos quatro efeitos rítmicos e versão no diagnóstico. CI reconstrói a fonte verificada e testa o APK e WebView.
+# EG MIX 11.5.5
+Performance e AutoDJ: cache por conteúdo, leitura tamponada, ranking dinâmico limitado a 128 candidatas, fila real, wake lock durante reprodução. CI com testes Android.

@@ -1,7 +1,7 @@
-name: EG MIX 11.5.4 - APK neural
+name: EG MIX 11.5.5 - APK neural
 on:
   push:
-    branches: [eg-mix-11-5-4-control-audit]
+    branches: [eg-mix-11-5-5-performance-autodj]
     paths: ['ci-source/**', '.github/workflows/eg-mix-11-4-8-neural.yml']
   workflow_dispatch:
 permissions:
@@ -38,6 +38,8 @@ jobs:
           unzip -oq ci-source/overlay-1153c.zip -d build-input/EG_MIX_11_4_8
           echo 'e973aa8bf6464edc3a47fb88ced5a390facb266ea25c1d9d2117908e6e750956  ci-source/overlay-1154.zip' | sha256sum -c -
           unzip -oq ci-source/overlay-1154.zip -d build-input/EG_MIX_11_4_8
+          echo 'e96160e38ead208d96c6e7d7782f3628c173fe7d36dde08f716f7af7b6d50697  ci-source/overlay-1155.zip' | sha256sum -c -
+          unzip -oq ci-source/overlay-1155.zip -d build-input/EG_MIX_11_4_8
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -56,12 +58,12 @@ jobs:
       - name: Regression tests
         working-directory: build-input/EG_MIX_11_4_8
         run: |
-          for suite in audio-safety session-integrity sampler-assets live-recovery smart-studio neural-pipeline native-stem stem-storage egmix security-reliability ux-fx; do bash tests/run-$suite-tests.sh; done
+          for suite in performance-autodj audio-safety session-integrity sampler-assets live-recovery smart-studio neural-pipeline native-stem stem-storage egmix security-reliability ux-fx; do bash tests/run-$suite-tests.sh; done
           python3 tests/check-all-assets.py
       - name: Export UI test harness
         uses: actions/upload-artifact@v4
         with:
-          name: EG-MIX-11.5.4-ui-test-script
+          name: EG-MIX-11.5.5-ui-test-script
           path: build-input/EG_MIX_11_4_8/tests/android-ui-smoke.mjs
           if-no-files-found: error
       - name: Prepare verified neural model
@@ -80,7 +82,7 @@ jobs:
           sha256sum app-debug.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: EG-MIX-11.5.4-neural-debug-apk
+          name: EG-MIX-11.5.5-neural-debug-apk
           path: |
             build-input/EG_MIX_11_4_8/app/build/outputs/apk/debug/app-debug.apk
             build-input/EG_MIX_11_4_8/app/build/outputs/apk/debug/SHA256SUMS.txt
@@ -93,7 +95,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: EG-MIX-11.5.4-neural-debug-apk
+          name: EG-MIX-11.5.5-neural-debug-apk
           path: live-apk
       - name: Verify exact APK and prepare test
         run: |
@@ -138,7 +140,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: EG-MIX-11.5.4-live-android-evidence
+          name: EG-MIX-11.5.5-live-android-evidence
           path: live-evidence/
           if-no-files-found: warn
 
@@ -152,11 +154,11 @@ jobs:
           node-version: '22'
       - uses: actions/download-artifact@v4
         with:
-          name: EG-MIX-11.5.4-neural-debug-apk
+          name: EG-MIX-11.5.5-neural-debug-apk
           path: live-apk
       - uses: actions/download-artifact@v4
         with:
-          name: EG-MIX-11.5.4-ui-test-script
+          name: EG-MIX-11.5.5-ui-test-script
           path: ui-test
       - name: Verify exact APK and prepare script
         run: |
@@ -176,6 +178,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: EG-MIX-11.5.4-ui-android-evidence
+          name: EG-MIX-11.5.5-ui-android-evidence
           path: ui-evidence/
           if-no-files-found: warn
