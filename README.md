@@ -1,2 +1,2 @@
 # EG MIX 11.5.3
-Session Reliability + WebView 83: ID de sessão, cache multidiretório, inicialização protegida, DOM compatível e teste real WebView + PCM.
+Session Reliability: cache multidiretório, WebView 83, controles testados e ranking BPM de baixa confiança sem forçar sincronização.

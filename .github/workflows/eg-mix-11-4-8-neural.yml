@@ -34,6 +34,8 @@ jobs:
           unzip -oq ci-source/overlay-1153.zip -d build-input/EG_MIX_11_4_8
           echo 'e84406438854f57296a5867242d663a286548b8c083c2e418cef0e059a865977  ci-source/overlay-1153b.zip' | sha256sum -c -
           unzip -oq ci-source/overlay-1153b.zip -d build-input/EG_MIX_11_4_8
+          echo 'dea2134e41559ee9acebb775c8084db9cd022fbf5a3ab964822e1ca8279433b5  ci-source/overlay-1153c.zip' | sha256sum -c -
+          unzip -oq ci-source/overlay-1153c.zip -d build-input/EG_MIX_11_4_8
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
