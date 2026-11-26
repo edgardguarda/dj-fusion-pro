@@ -1,2 +1,2 @@
-# EG MIX 11.5.2
-Live Recovery: análise progressiva, mixagem audível, correção de overflow no carregador WAV e teste real dos samplers. CI inclui emulador Android.
+# EG MIX 11.5.3
+Session Reliability: ID de sessão, cache multidiretório, inicialização protegida e teste real WebView + PCM. CI recompõe fontes verificadas.
