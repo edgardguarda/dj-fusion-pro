@@ -42,6 +42,8 @@ jobs:
           unzip -oq ci-source/overlay-1155.zip -d build-input/EG_MIX_11_4_8
           echo '16c0eaaff8ebf1d2b11ec626a9096acc244f568d3d153e0acd0838dad2171b76  ci-source/overlay-1156.zip' | sha256sum -c -
           unzip -oq ci-source/overlay-1156.zip -d build-input/EG_MIX_11_4_8
+          echo '4d3c51eb4bd9f1392c15759826709b943cfffe05b5a9cb0135ec1c73301562e6  ci-source/overlay-1156b.zip' | sha256sum -c -
+          unzip -oq ci-source/overlay-1156b.zip -d build-input/EG_MIX_11_4_8
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -119,13 +121,14 @@ jobs:
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           a={x.attrib['name']:x.attrib.get('value',x.text) for x in ET.parse('live-evidence/aura-state.xml').getroot()}
-          for k in ['smokePCM','live_fx_frames','live_sampler_frames','live_mixed_frames','live_mixed_transitions','live_hard_handoffs']: print(k,a.get(k))
+          for k in ['smokePCM','live_fx_frames','live_sampler_frames','live_mixed_frames','live_mixed_transitions','live_hard_handoffs','live_neural_transition_frames']: print(k,a.get(k))
           assert a['smokePCM']=='fixtures-created'
           assert int(a['live_fx_frames'])>4800
           assert int(a['live_sampler_frames'])>4800
           assert int(a['live_mixed_frames'])>48000
           assert int(a['live_mixed_transitions'])>=2
           assert int(a['live_hard_handoffs'])==0
+          assert int(a['live_neural_transition_frames'])>48000
           PY
           ! grep -q 'FATAL EXCEPTION' live-evidence/logcat.txt
           SH
