@@ -48,6 +48,8 @@ jobs:
           unzip -oq ci-source/overlay-1157.zip -d build-input/EG_MIX_11_4_8
           echo 'c455bde407814d4e827647445078c09914bba5c60afded564b893d40983615d7  ci-source/overlay-1158.zip' | sha256sum -c -
           unzip -oq ci-source/overlay-1158.zip -d build-input/EG_MIX_11_4_8
+          echo '4e0d49ab69aefa51499a64d7425e7545d4499046a6607d3d46a05b84a4d09698  ci-source/overlay-1158b.zip' | sha256sum -c -
+          unzip -oq ci-source/overlay-1158b.zip -d build-input/EG_MIX_11_4_8
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -73,6 +75,12 @@ jobs:
         with:
           name: EG-MIX-11.5.8-ui-test-script
           path: build-input/EG_MIX_11_4_8/tests/android-ui-smoke.mjs
+          if-no-files-found: error
+      - name: Export concurrent inference test
+        uses: actions/upload-artifact@v4
+        with:
+          name: EG-MIX-11.5.8-neural-test-script
+          path: build-input/EG_MIX_11_4_8/tests/android-neural-live.sh
           if-no-files-found: error
       - name: Prepare verified neural model
         working-directory: build-input/EG_MIX_11_4_8
@@ -189,4 +197,38 @@ jobs:
         with:
           name: EG-MIX-11.5.8-ui-android-evidence
           path: ui-evidence/
+          if-no-files-found: warn
+
+  android-neural-live:
+    needs: apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: EG-MIX-11.5.8-neural-debug-apk
+          path: live-apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: EG-MIX-11.5.8-neural-test-script
+          path: neural-test
+      - name: Verify exact APK and KVM access
+        run: |
+          (cd live-apk && sha256sum -c SHA256SUMS.txt)
+          sudo chmod 666 /dev/kvm || true
+      - name: Execute real neural model while PCM plays on Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -memory 4096
+          script: bash neural-test/android-neural-live.sh
+      - name: Publish concurrent inference evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EG-MIX-11.5.8-neural-live-evidence
+          path: neural-evidence/
           if-no-files-found: warn
