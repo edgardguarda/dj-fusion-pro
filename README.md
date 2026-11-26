@@ -1,2 +1,2 @@
-# EG MIX 11.5.6
-Neural Transition: troca de vocais entre decks com stems preparados, ganho RMS limitado, controle manual preservado. CI com teste de stems sintéticos no serviço Android.
+# EG MIX 11.5.7
+Loudness: medição estéreo integrada com K weighting e gating, ganho limitado, cache versionado, testes de regressão e Android. Sem certificação de conformidade BS.1770 nem true peak.
