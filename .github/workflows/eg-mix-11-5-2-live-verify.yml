@@ -1,0 +1,66 @@
+name: EG MIX 11.5.2 - live Android verification
+on:
+  push:
+    branches: [eg-mix-11-5-2-live-recovery]
+    paths: ['.github/workflows/eg-mix-11-5-2-live-verify.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: EG-MIX-11.5.2-neural-debug-apk
+          run-id: 45725651960
+          github-token: ${{ github.token }}
+          path: live-apk
+      - name: Verify exact APK and prepare test
+        run: |
+          echo '7c403d4102ea24a4f3732a11eb97d21d9c8cb1cdcd66fb77cdc5317d372c71c4  live-apk/app-debug.apk' | sha256sum -c -
+          sudo chmod 666 /dev/kvm || true
+          cat > live-test.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          mkdir -p live-evidence
+          adb install -r live-apk/app-debug.apk
+          adb logcat -c
+          adb shell am start -W -n br.com.edgard.aura.completo11/br.com.edgard.aura.DebugPcmSmokeActivity
+          for i in $(seq 1 20); do
+            sleep 4
+            adb exec-out run-as br.com.edgard.aura.completo11 cat shared_prefs/aura.xml > live-evidence/aura-state.xml || true
+            if grep -q 'name="live_mixed_transitions"' live-evidence/aura-state.xml; then break; fi
+          done
+          adb logcat -d -v time > live-evidence/logcat.txt
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          a={x.attrib['name']:x.attrib.get('value',x.text) for x in ET.parse('live-evidence/aura-state.xml').getroot()}
+          for k in ['smokePCM','live_fx_frames','live_sampler_frames','live_mixed_frames','live_mixed_transitions','live_hard_handoffs']: print(k,a.get(k))
+          assert a['smokePCM']=='fixtures-created'
+          assert int(a['live_fx_frames'])>4800
+          assert int(a['live_sampler_frames'])>4800
+          assert int(a['live_mixed_frames'])>48000
+          assert int(a['live_mixed_transitions'])>=2
+          assert int(a['live_hard_handoffs'])==0
+          PY
+          ! grep -q 'FATAL EXCEPTION' live-evidence/logcat.txt
+          SH
+      - name: Measure actual digital PCM rendering on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: bash live-test.sh
+      - name: Upload Android evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EG-MIX-11.5.2-live-android-evidence
+          path: live-evidence/
+          if-no-files-found: warn
