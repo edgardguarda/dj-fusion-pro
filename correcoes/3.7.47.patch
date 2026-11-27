@@ -1,0 +1,777 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index a0c1dc6..973d746 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -12,8 +12,8 @@ android {
+         applicationId = "app.djfusion.pro"   // provisório, muda no /replica-brand
+         minSdk = 27                           // AAudio disponível
+         targetSdk = 36                        // exigido pela Play Store desde 31/08/2026 (Android 16)
+-        versionCode = 88
+-        versionName = "3.7.44"
++        versionCode = 91
++        versionName = "3.7.47"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+ 
+         ndk {
+diff --git a/app/src/androidTest/java/app/djfusion/E2ETest.kt b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+index 8503324..e576098 100644
+--- a/app/src/androidTest/java/app/djfusion/E2ETest.kt
++++ b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+@@ -1155,6 +1155,24 @@ class E2ETest {
+             val semVoz = TrackShape.sections(wave, 0L, beatFrames, null)
+             check(semVoz.none { it.kind == 6 || it.kind == 7 }, "sem voz conhecida não marca DROP/INSTR.")
+         }
++        step("REDE DE BATIDAS: grade ajustada às batidas e ao '1' do compasso") {
++            val beats = IntArray(120) { 10 + it * 25 + (if (it % 7 == 3) 1 else 0) }   // 120 BPM, com pequena oscilação
++            val downs = IntArray(30) { beats[it * 4 + 2] }                              // o "1" cai na batida 2 da contagem
++            val g = app.djfusion.audio.BeatThis.fitGrid(beats, downs, 3100)
++            check(g != null, "grade nula")
++            log("info  grade: ${g!!.bpm} BPM, primeiro 1 em ${g.firstBeatFrame}, confiança ${g.confidence}")
++            check(kotlin.math.abs(g.bpm - 120.0) < 0.3, "andamento ${g.bpm}")
++            check(g.hasDownbeat, "tempo forte não reconhecido")
++            val esperado = (10 + 2 * 25) * 960L
++            check(kotlin.math.abs(g.firstBeatFrame - esperado) < 2500, "primeiro 1 em ${g.firstBeatFrame}, esperado ~$esperado")
++            check(g.confidence > 0.6f, "confiança ${g.confidence}")
++            check(app.djfusion.audio.BeatThis.fitGrid(IntArray(5) { it * 25 }, IntArray(0), 400) == null, "poucas batidas devem dar null")
++            val tone = FloatArray(22050 * 2) { (0.5 * kotlin.math.sin(it * 0.1)).toFloat() }
++            val f = app.djfusion.audio.BeatThis.features(tone)
++            check(f.size == (1 + tone.size / 441) * 128, "tamanho do espectro ${f.size}")
++            check(f.all { !it.isNaN() && it >= 0f }, "espectro com valores inválidos")
++            check(f.max() > 1f, "espectro sem energia")
++        }
+         step("3 EFEITOS juntos (encaixes FX1, FX2 e FX3)") {
+             tap("Efeito ECO do deck A (tela", substring = true)
+             tap("Encaixe FX2 do deck A (tela", substring = true)
+diff --git a/app/src/main/cpp/core/bpm.h b/app/src/main/cpp/core/bpm.h
+index 37f4d38..32b9e3a 100644
+--- a/app/src/main/cpp/core/bpm.h
++++ b/app/src/main/cpp/core/bpm.h
+@@ -36,53 +36,90 @@ inline double combScore(const std::vector<float>& env, size_t a, size_t b, doubl
+   for (size_t t = a; t < b; ++t) {
+     const float e = env[t];
+     if (e <= 0.f) continue;
+-    s += e * (lerpAt(env, static_cast<double>(t) + lag) + 0.5 * lerpAt(env, static_cast<double>(t) + 2 * lag));
++    s += e * (lerpAt(env, static_cast<double>(t) + lag) + lerpAt(env, static_cast<double>(t) + 2 * lag) + lerpAt(env, static_cast<double>(t) + 3 * lag) + lerpAt(env, static_cast<double>(t) + 4 * lag));
+   }
+   return s;
+ }
+ // Curva de ataques (energia dos graves e do sinal inteiro, só as subidas, sem a média local): 200 valores por segundo.
++inline void fft1024(std::vector<double>& re, std::vector<double>& im) {
++  const int N = 1024;
++  for (int i = 1, j = 0; i < N; ++i) {
++    int bit = N >> 1;
++    for (; j & bit; bit >>= 1) j ^= bit;
++    j ^= bit;
++    if (i < j) { std::swap(re[i], re[j]); std::swap(im[i], im[j]); }
++  }
++  for (int len = 2; len <= N; len <<= 1) {
++    const double ang = -2.0 * 3.14159265358979323846 / len;
++    const double wr = std::cos(ang), wi = std::sin(ang);
++    for (int i = 0; i < N; i += len) {
++      double cr = 1, ci = 0;
++      for (int k = 0; k < len / 2; ++k) {
++        const int a = i + k, b = i + k + len / 2;
++        const double xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
++        re[b] = re[a] - xr; im[b] = im[a] - xi;
++        re[a] += xr; im[a] += xi;
++        const double nr = cr * wr - ci * wi;
++        ci = cr * wi + ci * wr; cr = nr;
++      }
++    }
++  }
++}
++
++// Curva de ataques por fluxo espectral (subidas do espectro em 3 faixas: graves, médios, agudos): 200 valores por segundo.
+ inline std::vector<float> onsetEnv(const Track& t) {
+   const int sr = t.sampleRate;
+   const int64_t nHops = t.frames / kHop;
+   std::vector<float> env(static_cast<size_t>(nHops), 0.f);
+-  {
+-    const double pi = 3.14159265358979323846;
+-    const double a = 1.0 - std::exp(-2.0 * pi * 150.0 / sr);
+-    double l1 = 0, l2 = 0, prevLow = 0, prevFull = 0;
+-    for (int64_t h = 0; h < nHops; ++h) {
+-      double eLow = 0, eFull = 0;
+-      const int16_t* p = &t.pcm[static_cast<size_t>(h) * kHop * 2];
+-      for (int i = 0; i < kHop; ++i) {
+-        const double m = 0.5 * (p[2 * i] + p[2 * i + 1]) / 32768.0;
+-        l1 += a * (m - l1);
+-        l2 += a * (l1 - l2);
+-        eLow += l2 * l2;
+-        eFull += m * m;
+-      }
+-      eLow /= kHop;
+-      eFull /= kHop;
+-      const double lowDb = std::log(1.0 + 3000.0 * eLow);
+-      const double fullDb = std::log(1.0 + 300.0 * eFull);
+-      env[static_cast<size_t>(h)] = static_cast<float>(std::max(0.0, lowDb - prevLow) + 0.5 * std::max(0.0, fullDb - prevFull));
+-      prevLow = lowDb;
+-      prevFull = fullDb;
+-    }
+-    // tira a média local (1 s) para sobrar só o que sobressai
+-    std::vector<float> smooth(env.size());
+-    double acc = 0;
+-    const int w = 100;
+-    for (size_t i = 0; i < env.size(); ++i) {
+-      acc += env[i];
+-      if (i >= static_cast<size_t>(2 * w)) acc -= env[i - 2 * w];
+-      const size_t n = std::min(i + 1, static_cast<size_t>(2 * w));
+-      smooth[i] = static_cast<float>(acc / n);
++  const int N = 1024;
++  std::vector<double> win(N), re(N), im(N), prev(N / 2 + 1, 0.0);
++  for (int i = 0; i < N; ++i) win[i] = 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * i / N);
++  const double binHz = static_cast<double>(sr) / N;
++  const int kLo0 = std::max(1, static_cast<int>(30.0 / binHz)), kLo1 = static_cast<int>(200.0 / binHz);
++  const int kMid1 = static_cast<int>(3000.0 / binHz), kHi1 = static_cast<int>(12000.0 / binHz);
++  std::vector<double> lo(nHops, 0.0), mid(nHops, 0.0), hi(nHops, 0.0);
++  for (int64_t h = 0; h < nHops; ++h) {
++    const int64_t start = h * kHop - N / 2;
++    for (int i = 0; i < N; ++i) {
++      const int64_t f = start + i;
++      double m = 0;
++      if (f >= 0 && f < t.frames) m = 0.5 * (t.pcm[static_cast<size_t>(f) * 2] + t.pcm[static_cast<size_t>(f) * 2 + 1]) / 32768.0;
++      re[i] = m * win[i];
++      im[i] = 0;
+     }
+-    for (size_t i = 0; i < env.size(); ++i) {
+-      const size_t j = std::min(env.size() - 1, i + w);  // centraliza a janela
+-      env[i] = std::max(0.f, env[i] - smooth[j]);
++    fft1024(re, im);
++    double sl = 0, sm = 0, sh = 0;
++    for (int k = kLo0; k <= kHi1; ++k) {
++      const double mag = std::log1p(100.0 * std::sqrt(re[k] * re[k] + im[k] * im[k]));
++      const double d = std::max(0.0, mag - prev[k]);
++      prev[k] = mag;
++      if (k <= kLo1) sl += d; else if (k < kMid1) sm += d; else sh += d;
+     }
++    lo[h] = sl; mid[h] = sm; hi[h] = sh;
++  }
++  auto sd = [](const std::vector<double>& v) {
++    double m = 0, q = 0;
++    for (double x : v) m += x;
++    m /= std::max<size_t>(1, v.size());
++    for (double x : v) q += (x - m) * (x - m);
++    return std::sqrt(q / std::max<size_t>(1, v.size())) + 1e-9;
++  };
++  const double sl = sd(lo), sm = sd(mid), sh = sd(hi);
++  for (int64_t h = 0; h < nHops; ++h) env[static_cast<size_t>(h)] = static_cast<float>(lo[h] / sl + 0.5 * mid[h] / sm + 0.3 * hi[h] / sh);
++  // tira a média local (1 s) para sobrar só o que sobressai
++  std::vector<float> smooth(env.size());
++  double acc = 0;
++  const int w = 100;
++  for (size_t i = 0; i < env.size(); ++i) {
++    acc += env[i];
++    if (i >= static_cast<size_t>(2 * w)) acc -= env[i - 2 * w];
++    const size_t n = std::min(i + 1, static_cast<size_t>(2 * w));
++    smooth[i] = static_cast<float>(acc / n);
++  }
++  for (size_t i = 0; i < env.size(); ++i) {
++    const size_t j = std::min(env.size() - 1, i + w);
++    env[i] = std::max(0.f, env[i] - smooth[j]);
+   }
+-
+   return env;
+ }
+ }  // namespace bpm_detail
+@@ -95,7 +132,7 @@ inline BpmResult analyzeBpm(const Track& t) {
+   // 1) curva de ataques
+   std::vector<float> env = onsetEnv(t);
+   // 2) janela de análise do andamento: até 90 s, no meio da faixa
+-  const size_t winLen = std::min<size_t>(env.size(), 90 * 200);
++  const size_t winLen = std::min<size_t>(env.size(), 150 * 200);
+   const size_t winA = (env.size() - winLen) / 2, winB = winA + winLen;
+   double zero = 0;
+   for (size_t i = winA; i < winB; ++i) zero += static_cast<double>(env[i]) * env[i];
+@@ -140,7 +177,7 @@ inline BpmResult analyzeBpm(const Track& t) {
+ 
+   res.bpm = bestBpm;
+   res.firstBeatFrame = static_cast<int64_t>((bestPhase + 0.5) * kHop);
+-  res.confidence = static_cast<float>(std::min(1.0, std::max(0.0, bestRaw / zero)));
++  res.confidence = static_cast<float>(std::min(1.0, std::max(0.0, 1.6 * bestRaw / (4.0 * zero))));
+   return res;
+ }
+ 
+diff --git a/app/src/main/cpp/native_bridge.cpp b/app/src/main/cpp/native_bridge.cpp
+index fb61b00..fe8b710 100644
+--- a/app/src/main/cpp/native_bridge.cpp
++++ b/app/src/main/cpp/native_bridge.cpp
+@@ -165,6 +165,34 @@ JNI(jlong, nativeTrackFrames)(JNIEnv*, jclass, jlong track) {
+   return t ? (*t)->frames : 0;
+ }
+ 
++JNI(jfloatArray, nativeTrackMono22k)(JNIEnv* env, jclass, jlong track) {
++  auto* t = reinterpret_cast<TrackPtr*>(track);
++  if (!t || (*t)->frames <= 0) return nullptr;
++  const Track& tr = **t;
++  const double ratio = static_cast<double>(tr.sampleRate) / 22050.0;
++  const jsize n = static_cast<jsize>(static_cast<double>(tr.frames) / ratio);
++  if (n <= 0) return nullptr;
++  jfloatArray arr = env->NewFloatArray(n);
++  if (!arr) return nullptr;
++  std::vector<float> out(static_cast<size_t>(n));
++  // média por área (filtro caixa) do canal esquerdo+direito: serve de passa-baixa antes de reduzir a taxa
++  for (jsize i = 0; i < n; i++) {
++    const double a = i * ratio, b = a + ratio;
++    int64_t ia = static_cast<int64_t>(a), ib = static_cast<int64_t>(b);
++    if (ib >= tr.frames) ib = tr.frames - 1;
++    double sum = 0.0, wsum = 0.0;
++    for (int64_t k = ia; k <= ib; k++) {
++      const double w = std::min<double>(k + 1, b) - std::max<double>(k, a);
++      if (w <= 0) continue;
++      sum += w * (tr.pcm[2 * k] + tr.pcm[2 * k + 1]) * 0.5;
++      wsum += w;
++    }
++    out[i] = wsum > 0 ? static_cast<float>(sum / wsum / 32768.0) : 0.f;
++  }
++  env->SetFloatArrayRegion(arr, 0, n, out.data());
++  return arr;
++}
++
+ JNI(jbyteArray, nativeTrackPeaks)(JNIEnv* env, jclass, jlong track) {
+   auto* t = reinterpret_cast<TrackPtr*>(track);
+   const size_t n = t ? (*t)->peaks.size() : 0;
+diff --git a/app/src/main/java/app/djfusion/audio/BeatThis.kt b/app/src/main/java/app/djfusion/audio/BeatThis.kt
+new file mode 100644
+index 0000000..971b1a8
+--- /dev/null
++++ b/app/src/main/java/app/djfusion/audio/BeatThis.kt
+@@ -0,0 +1,295 @@
++package app.djfusion.audio
++
++import ai.onnxruntime.OnnxTensor
++import ai.onnxruntime.OrtEnvironment
++import ai.onnxruntime.OrtSession
++import android.content.Context
++import java.io.File
++import java.net.HttpURLConnection
++import java.net.URL
++import java.nio.FloatBuffer
++import kotlin.math.PI
++import kotlin.math.abs
++import kotlin.math.cos
++import kotlin.math.exp
++import kotlin.math.floor
++import kotlin.math.ln
++import kotlin.math.max
++import kotlin.math.min
++import kotlin.math.roundToInt
++import kotlin.math.sin
++import kotlin.math.sqrt
++
++/**
++ * Rede de batidas e tempos fortes (Beat This!, CPJKU, licença MIT; modelo pequeno de 2 milhões de parâmetros),
++ * rodando no aparelho com o ONNX Runtime. O modelo (~10 MB) é baixado uma vez e fica guardado; sem ele o app usa a
++ * detecção clássica ([analyzeBpm] no C++). A rede recebe o espectro em mel da faixa (22 050 Hz, 128 faixas,
++ * 50 quadros por segundo) e devolve, quadro a quadro, a chance de ter uma batida e de ser o "1" do compasso.
++ * Daí sai a grade da faixa: andamento, onde cai a primeira batida e o "1" do compasso.
++ */
++object BeatThis {
++    private const val MODEL_URL = "https://huggingface.co/ashudesai/songbird-models/resolve/main/small0.onnx"
++    private const val MIN_BYTES = 4_000_000L
++    private const val MAX_BYTES = 40_000_000L
++
++    const val SR = 22050
++    const val NFFT = 1024
++    const val HOP = 441
++    const val NMEL = 128
++    const val CHUNK = 1500
++    private const val BORDER = 6
++    const val FPS = 50.0
++
++    /** Resultado: andamento, primeiro "1" do compasso (em quadros a 48 kHz), confiança de 0 a 1 e se os tempos fortes vieram da rede. */
++    class Grid(val bpm: Double, val firstBeatFrame: Long, val confidence: Float, val hasDownbeat: Boolean, val beats: Int)
++
++    fun modelFile(ctx: Context) = File(File(ctx.filesDir, "modelos/beat_this"), "small0.onnx")
++    fun isReady(ctx: Context): Boolean = modelFile(ctx).let { it.isFile && it.length() in MIN_BYTES..MAX_BYTES }
++
++    private val lock = Any()
++    private var session: OrtSession? = null
++
++    /** Baixa e confere o modelo. Devolve null se deu certo, ou o motivo da falha. Bloqueia: chame fora da thread principal. */
++    fun download(ctx: Context): String? {
++        val dest = modelFile(ctx)
++        try {
++            dest.parentFile?.mkdirs()
++            val part = File(dest.parentFile, "small0.onnx.part")
++            val c = URL(MODEL_URL).openConnection() as HttpURLConnection
++            c.connectTimeout = 20_000
++            c.readTimeout = 30_000
++            c.instanceFollowRedirects = true
++            c.setRequestProperty("User-Agent", "EdgardGuardaDJStudio")
++            if (c.responseCode != 200) return "servidor respondeu ${c.responseCode}"
++            c.inputStream.use { ins -> part.outputStream().use { outs -> ins.copyTo(outs) } }
++            c.disconnect()
++            if (part.length() !in MIN_BYTES..MAX_BYTES) { part.delete(); return "arquivo veio incompleto (${part.length()} bytes)" }
++            if (!part.renameTo(dest)) { part.delete(); return "não consegui gravar o modelo" }
++            OrtEnvironment.getEnvironment().createSession(dest.absolutePath).close()
++            return null
++        } catch (e: Throwable) {
++            dest.delete()
++            return e.message ?: e.javaClass.simpleName
++        }
++    }
++
++    // ---------------------------------------------------------------- espectro em mel (igual ao do treino)
++
++    private val window = DoubleArray(NFFT) { 0.5 - 0.5 * cos(2.0 * PI * it / NFFT) }   // Hann periódica
++    private val cosT = DoubleArray(NFFT / 2) { cos(2.0 * PI * it / NFFT) }
++    private val sinT = DoubleArray(NFFT / 2) { -sin(2.0 * PI * it / NFFT) }
++    private val bitRev = IntArray(NFFT).also { r ->
++        val bits = 10
++        for (i in 0 until NFFT) { var x = i; var y = 0; for (b in 0 until bits) { y = (y shl 1) or (x and 1); x = x shr 1 }; r[i] = y }
++    }
++
++    private fun hzToMel(f: Double): Double {
++        val fSp = 200.0 / 3.0
++        val minLogMel = 1000.0 / fSp
++        val logStep = ln(6.4) / 27.0
++        return if (f >= 1000.0) minLogMel + ln(f / 1000.0) / logStep else f / fSp
++    }
++
++    private fun melToHz(m: Double): Double {
++        val fSp = 200.0 / 3.0
++        val minLogMel = 1000.0 / fSp
++        val logStep = ln(6.4) / 27.0
++        return if (m >= minLogMel) 1000.0 * exp(logStep * (m - minLogMel)) else fSp * m
++    }
++
++    /** Filtros triangulares em escala mel de Slaney (30 Hz a 11 kHz), sem normalizar a área, como no treino. */
++    private val bank: Array<FloatArray> by lazy {
++        val nBins = NFFT / 2 + 1
++        val mMin = hzToMel(30.0)
++        val mMax = hzToMel(11000.0)
++        val pts = DoubleArray(NMEL + 2) { melToHz(mMin + (mMax - mMin) * it / (NMEL + 1)) }
++        Array(NMEL) { m ->
++            val lo = pts[m]; val ce = pts[m + 1]; val hi = pts[m + 2]
++            FloatArray(nBins) { k ->
++                val f = k * SR.toDouble() / NFFT
++                max(0.0, min((f - lo) / (ce - lo), (hi - f) / (hi - ce))).toFloat()
++            }
++        }
++    }
++
++    /** Primeiro e último índice com peso diferente de zero em cada filtro (a maior parte é zero). */
++    private val bankSpan: Array<IntArray> by lazy {
++        Array(NMEL) { m ->
++            var lo = -1; var hi = -1
++            for (k in bank[m].indices) if (bank[m][k] > 0f) { if (lo < 0) lo = k; hi = k }
++            if (lo < 0) intArrayOf(0, -1) else intArrayOf(lo, hi)
++        }
++    }
++
++    private fun fft(re: DoubleArray, im: DoubleArray) {
++        for (i in 0 until NFFT) { val j = bitRev[i]; if (j > i) { val tr = re[i]; re[i] = re[j]; re[j] = tr; val ti = im[i]; im[i] = im[j]; im[j] = ti } }
++        var len = 2
++        while (len <= NFFT) {
++            val half = len / 2
++            val step = NFFT / len
++            var s = 0
++            while (s < NFFT) {
++                for (k in 0 until half) {
++                    val wr = cosT[k * step]; val wi = sinT[k * step]
++                    val a = s + k; val b = a + half
++                    val xr = re[b] * wr - im[b] * wi
++                    val xi = re[b] * wi + im[b] * wr
++                    re[b] = re[a] - xr; im[b] = im[a] - xi
++                    re[a] += xr; im[a] += xi
++                }
++                s += len
++            }
++            len = len shl 1
++        }
++    }
++
++    /** Espectro em mel com log: [quadros x 128], 50 quadros por segundo. */
++    fun features(x: FloatArray): FloatArray {
++        val n = x.size
++        val frames = 1 + n / HOP
++        val out = FloatArray(frames * NMEL)
++        val re = DoubleArray(NFFT)
++        val im = DoubleArray(NFFT)
++        val mag = DoubleArray(NFFT / 2 + 1)
++        val norm = 1.0 / sqrt(NFFT.toDouble())
++        for (t in 0 until frames) {
++            val start = t * HOP - NFFT / 2
++            for (i in 0 until NFFT) {
++                var idx = start + i
++                if (idx < 0) idx = -idx
++                if (idx >= n) idx = 2 * (n - 1) - idx
++                idx = idx.coerceIn(0, n - 1)
++                re[i] = x[idx] * window[i]
++                im[i] = 0.0
++            }
++            fft(re, im)
++            for (k in 0..NFFT / 2) mag[k] = sqrt(re[k] * re[k] + im[k] * im[k]) * norm
++            for (m in 0 until NMEL) {
++                val lo = bankSpan[m][0]; val hi = bankSpan[m][1]
++                var sum = 0.0
++                val w = bank[m]
++                for (k in lo..hi) sum += w[k] * mag[k]
++                out[t * NMEL + m] = ln(1.0 + 1000.0 * sum).toFloat()
++            }
++        }
++        return out
++    }
++
++    // ---------------------------------------------------------------- a rede
++
++    private fun session(ctx: Context): OrtSession = synchronized(lock) {
++        session ?: OrtEnvironment.getEnvironment().createSession(
++            modelFile(ctx).absolutePath, OrtSession.SessionOptions().apply { setIntraOpNumThreads(2) },
++        ).also { session = it }
++    }
++
++    /** Roda a rede em pedaços de 30 s (juntando só o meio de cada pedaço). Devolve (batida, tempo forte) por quadro. */
++    fun infer(ctx: Context, feat: FloatArray): Pair<FloatArray, FloatArray> {
++        val total = feat.size / NMEL
++        val beat = FloatArray(total)
++        val down = FloatArray(total)
++        val env = OrtEnvironment.getEnvironment()
++        val sess = session(ctx)
++        val inName = sess.inputNames.first()
++        val outNames = sess.outputNames.toList()
++        val iBeat = outNames.indexOfFirst { it.contains("beat", true) && !it.contains("down", true) }.let { if (it < 0) 0 else it }
++        val iDown = outNames.indexOfFirst { it.contains("down", true) }.let { if (it < 0) 1 else it }
++        val step = CHUNK - 2 * BORDER
++        var s = 0
++        while (true) {
++            val len = min(CHUNK, total - s)
++            val buf = FloatArray(CHUNK * NMEL)
++            System.arraycopy(feat, s * NMEL, buf, 0, len * NMEL)
++            OnnxTensor.createTensor(env, FloatBuffer.wrap(buf), longArrayOf(1, CHUNK.toLong(), NMEL.toLong())).use { input ->
++                sess.run(mapOf(inName to input)).use { res ->
++                    val fb = (res.get(iBeat) as OnnxTensor).floatBuffer
++                    val fd = (res.get(iDown) as OnnxTensor).floatBuffer
++                    val from = if (s == 0) 0 else BORDER
++                    val to = if (s + len >= total) len else CHUNK - BORDER
++                    for (j in from until min(to, min(fb.capacity(), fd.capacity()))) {
++                        if (s + j < total) { beat[s + j] = fb.get(j); down[s + j] = fd.get(j) }
++                    }
++                }
++            }
++            if (s + CHUNK >= total) break
++            s += step
++        }
++        return beat to down
++    }
++
++    /** Picos da saída da rede: valor acima de zero e o maior numa janela de ±3 quadros (60 ms). */
++    fun peaks(logits: FloatArray): IntArray {
++        val res = ArrayList<Int>()
++        for (i in logits.indices) {
++            if (logits[i] <= 0f) continue
++            var isMax = true
++            for (j in max(0, i - 3)..min(logits.size - 1, i + 3)) {
++                if (logits[j] > logits[i] || (logits[j] == logits[i] && j < i)) { isMax = false; break }
++            }
++            if (isMax) res.add(i)
++        }
++        return res.toIntArray()
++    }
++
++    // ---------------------------------------------------------------- grade
++
++    /**
++     * Ajusta uma grade fixa às batidas da rede (reta pelos mínimos quadrados, descartando as que fogem mais de 50 ms)
++     * e acha o "1" do compasso pelo voto dos tempos fortes. [beats] e [downs] estão em quadros de 50 por segundo.
++     * Devolve null se há batidas de menos ou o andamento não faz sentido.
++     */
++    fun fitGrid(beats: IntArray, downs: IntArray, totalFrames: Int): Grid? {
++        val n = beats.size
++        if (n < 12) return null
++        val d = DoubleArray(n - 1) { (beats[it + 1] - beats[it]).toDouble() }
++        val med = d.sorted()[d.size / 2]
++        if (med < 15.0 || med > 60.0) return null      // 200 a 50 BPM
++        val idx = IntArray(n)
++        var cur = 0
++        for (i in 1 until n) { cur += max(1, (d[i - 1] / med).roundToInt()); idx[i] = cur }
++        val inl = BooleanArray(n) { true }
++        var a = beats[0].toDouble()
++        var b = med
++        repeat(3) {
++            var sx = 0.0; var sy = 0.0; var sxx = 0.0; var sxy = 0.0; var c = 0
++            for (i in 0 until n) if (inl[i]) {
++                val x = idx[i].toDouble(); val y = beats[i].toDouble()
++                sx += x; sy += y; sxx += x * x; sxy += x * y; c++
++            }
++            val den = c * sxx - sx * sx
++            if (c < 8 || den <= 0.0) return null
++            b = (c * sxy - sx * sy) / den
++            a = (sy - b * sx) / c
++            for (i in 0 until n) inl[i] = abs(beats[i] - (a + b * idx[i])) <= 2.5
++        }
++        var k = 0
++        for (i in 0 until n) if (inl[i]) k++
++        if (k < 8 || b <= 0.0) return null
++        val coverage = min(1.0, n * b / max(1, totalFrames))
++        val conf = (k.toDouble() / n) * sqrt(coverage)
++        // o "1" do compasso: de cada tempo forte vem a posição na contagem de batidas (módulo 4)
++        val votes = IntArray(4)
++        var voted = 0
++        for (dn in downs) {
++            var best = -1; var bd = Int.MAX_VALUE
++            for (i in 0 until n) { val dd = abs(beats[i] - dn); if (dd < bd) { bd = dd; best = i } }
++            if (best >= 0 && bd <= 3) { votes[((idx[best] % 4) + 4) % 4]++; voted++ }
++        }
++        val hasDown = voted >= 3
++        var phase = 0
++        if (hasDown) for (p in 1..3) if (votes[p] > votes[phase]) phase = p
++        val bar = 4.0 * b
++        var first = a + phase * b
++        first -= floor(first / bar) * bar
++        val bpm = FPS * 60.0 / b
++        return Grid(bpm, (first * (48000.0 / FPS)).toLong(), conf.toFloat().coerceIn(0f, 1f), hasDown, n)
++    }
++
++    /** Faixa inteira (mono, 22 050 Hz) → grade. Null se faltou modelo, a faixa é curta ou a rede não achou batidas. */
++    fun analyze(ctx: Context, mono: FloatArray): Grid? {
++        if (mono.size < SR * 20) return null
++        val feat = features(mono)
++        val (bl, dl) = infer(ctx, feat)
++        return fitGrid(peaks(bl), peaks(dl), feat.size / NMEL)
++    }
++}
+diff --git a/app/src/main/java/app/djfusion/audio/NativeEngine.kt b/app/src/main/java/app/djfusion/audio/NativeEngine.kt
+index 7d715e9..a7f1b97 100644
+--- a/app/src/main/java/app/djfusion/audio/NativeEngine.kt
++++ b/app/src/main/java/app/djfusion/audio/NativeEngine.kt
+@@ -51,6 +51,8 @@ object NativeEngine {
+     @JvmStatic external fun nativeDecodeProgress(slot: Int): Float
+     @JvmStatic external fun nativeAbortTrack(handle: Long)
+     @JvmStatic external fun nativeTrackFrames(track: Long): Long
++    /** A faixa inteira em mono, 22 050 Hz, de -1 a 1 (entrada da rede de batidas). */
++    @JvmStatic external fun nativeTrackMono22k(track: Long): FloatArray?
+     @JvmStatic external fun nativeTrackPeaks(track: Long): ByteArray
+     @JvmStatic external fun nativeFreeTrack(track: Long)
+     /** Volume da voz por trecho de 320 quadros (0 a 255), só depois dos stems; vazio se não houver. */
+diff --git a/app/src/main/java/app/djfusion/data/LibraryDb.kt b/app/src/main/java/app/djfusion/data/LibraryDb.kt
+index d21cdf6..ee71493 100644
+--- a/app/src/main/java/app/djfusion/data/LibraryDb.kt
++++ b/app/src/main/java/app/djfusion/data/LibraryDb.kt
+@@ -150,6 +150,11 @@ class LibraryDb(context: Context) : SQLiteOpenHelper(context, "library.db", null
+         writableDatabase.update("tracks", values, "id = ?", arrayOf(trackId.toString()))
+     }
+ 
++    /** Apaga o andamento detectado pelo método antigo (menos o que o DJ corrigiu à mão, com confiança 1) para reanalisar. */
++    fun resetAutoBeatAnalysis() {
++        writableDatabase.execSQL("UPDATE tracks SET bpm = NULL, bpm_conf = 0 WHERE bpm IS NOT NULL AND (bpm_conf IS NULL OR bpm_conf < 1.0)")
++    }
++
+     /** Faixas que ainda não têm andamento ou tonalidade. */
+     fun unanalyzed(): List<TrackRow> {
+         val out = ArrayList<TrackRow>()
+diff --git a/app/src/main/java/app/djfusion/ui/AppViewModel.kt b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+index 91620b5..c7ba656 100644
+--- a/app/src/main/java/app/djfusion/ui/AppViewModel.kt
++++ b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+@@ -1352,6 +1352,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+         return done.get()
+     }
+ 
++    /**
++     * Grade da faixa: usa a rede neural de batidas (Beat This!) quando o modelo já foi baixado e a grade dela é confiável;
++     * se não, a detecção clássica. Fica com a de maior confiança quando as duas concordam no andamento (±3%) ou a rede é boa.
++     */
++    private fun analyzeGrid(h: Long): Analysis {
++        val out = DoubleArray(3)
++        NativeEngine.nativeAnalyze(h, out)
++        val classic = Analysis(out[0], out[1].toLong(), out[2].toFloat())
++        val ctx = getApplication<Application>()
++        if (!app.djfusion.audio.BeatThis.isReady(ctx)) return withDownbeat(classic, h)
++        return try {
++            val mono = NativeEngine.nativeTrackMono22k(h) ?: return withDownbeat(classic, h)
++            val g = app.djfusion.audio.BeatThis.analyze(ctx, mono) ?: return withDownbeat(classic, h)
++            // a rede só vale quando concorda com o método clássico (testado em música real) ou quando ele não achou nada
++            val agrees = classic.bpm > 0 && kotlin.math.abs(g.bpm / classic.bpm - 1.0) < 0.03
++            val useNeural = g.confidence >= 0.6f && g.bpm in 60.0..200.0 && (agrees || classic.confidence < 0.3f)
++            if (!useNeural) return withDownbeat(classic, h)
++            val beat = 60.0 * NativeEngine.SAMPLE_RATE / g.bpm
++            // a rede acha o "1" do compasso; sem voto suficiente, cai no método clássico dos picos
++            val base = Analysis(g.bpm, g.firstBeatFrame, maxOf(g.confidence, classic.confidence))
++            if (g.hasDownbeat) base else withDownbeat(base.copy(firstBeatFrame = g.firstBeatFrame), h)
++        } catch (e: Throwable) {
++            app.djfusion.ErrorLog.add("beat this", "falhou, usando o método clássico", e)
++            withDownbeat(classic, h)
++        }
++    }
++
++    /** Baixa o modelo de batidas uma vez, em segundo plano. */
++    fun ensureBeatModel() {
++        val ctx = getApplication<Application>()
++        if (app.djfusion.audio.BeatThis.isReady(ctx)) return
++        viewModelScope.launch(Dispatchers.IO) {
++            val err = app.djfusion.audio.BeatThis.download(ctx)
++            if (err != null) app.djfusion.ErrorLog.add("beat this", "modelo de batidas não baixou: $err")
++        }
++    }
++
+     private suspend fun analyzeOne(row: TrackRow) {
+         val r = TrackDecoder.decode(getApplication(), Uri.parse(row.uri), 4) { }
+         if (r is DecodeResult.Ready) {
+@@ -1360,9 +1397,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+                     NeuralStems.workPriority()
+                     var a = db.analysis(row.id)
+                     if (a == null) {
+-                        val out = DoubleArray(3)
+-                        NativeEngine.nativeAnalyze(r.trackHandle, out)
+-                        a = withDownbeat(Analysis(out[0], out[1].toLong(), out[2].toFloat()), r.trackHandle)
++                        a = analyzeGrid(r.trackHandle)
+                     }
+                     if (a.keyTonic < 0) {
+                         val k = IntArray(4)
+@@ -1399,6 +1434,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+     }
+ 
+     init {
++        // 3.7.45: o detector de andamento foi trocado (testado em 14 faixas reais, 3 estavam erradas): refaz as grades antigas uma vez
++        viewModelScope.launch(Dispatchers.IO) {
++            val pr = getApplication<Application>().getSharedPreferences("analise", android.content.Context.MODE_PRIVATE)
++            if (pr.getInt("algoritmo", 1) < 2) {
++                try { db.resetAutoBeatAnalysis(); pr.edit().putInt("algoritmo", 2).apply() } catch (_: Throwable) {}
++            }
++        }
++        ensureBeatModel()
+         NeuralStems.deckPlaying = { _decks.value.any { it.playing } }
+         midi.start()
+         router.start()
+@@ -3303,9 +3346,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+                         NeuralStems.workPriority()
+                         var a = cached
+                         if (a == null) {
+-                            val out = DoubleArray(3)
+-                            NativeEngine.nativeAnalyze(h, out)
+-                            a = withDownbeat(Analysis(out[0], out[1].toLong(), out[2].toFloat()), h)
++                            a = analyzeGrid(h)
+                         }
+                         if (a.keyTonic < 0) {
+                             val k = IntArray(4)
+diff --git a/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt b/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
+index 2f41cbb..19bc9d2 100644
+--- a/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/DjLiveScreen.kt
+@@ -1082,10 +1082,11 @@ private fun KnobInline(label: String, value: Float, description: String, centere
+ 
+ @Composable
+ private fun ChannelStrip(
+-    vm: AppViewModel, deck: Int, d: DeckUi, volume: Float, live: State<LiveUi>, modifier: Modifier,
++    vm: AppViewModel, deck: Int, d: DeckUi, volume: Float, live: State<LiveUi>, modifier: Modifier, onSilver: Boolean = false,
+ ) {
+     val name = AppViewModel.deckName(deck)
+     val color = deckColor(deck)
++    androidx.compose.runtime.CompositionLocalProvider(LocalOnSilver provides onSilver) {
+     Row(modifier.padding(horizontal = 1.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+         val knobs = @Composable {
+             Column(Modifier.width(46.dp).fillMaxHeight(), verticalArrangement = Arrangement.SpaceEvenly, horizontalAlignment = Alignment.CenterHorizontally) {
+@@ -1109,14 +1110,20 @@ private fun ChannelStrip(
+         }
+         if (deck % 2 == 0) { knobs(); fader(); meter() } else { meter(); fader(); knobs() }
+     }
++    }
+ }
+ 
++/** Verdadeiro quando os botões estão sobre a chapa prateada: rótulos em cinza escuro e botões maiores. */
++private val LocalOnSilver = androidx.compose.runtime.compositionLocalOf { false }
++
+ @Composable
+ private fun KnobCell(label: String, value: Float, color: Color, description: String, onKill: (() -> Unit)? = null, onChange: (Float) -> Unit) {
++    val silver = LocalOnSilver.current
++    val labelColor = if (silver) InoxMuted else Metal.TextMuted
+     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+-        Knob(value = value, onChange = onChange, accent = color, description = description, modifier = Modifier.size(30.dp))
++        Knob(value = value, onChange = onChange, accent = color, description = description, modifier = Modifier.size(if (silver) 38.dp else 30.dp))
+         if (onKill == null) {
+-            Text(label, color = Metal.TextMuted, fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
++            Text(label, color = labelColor, fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+         } else {
+             // o nome da faixa é também o botão KILL: toque corta a faixa (fica vermelho), toque de novo devolve
+             val killed = value <= 0.01f
+@@ -1126,7 +1133,7 @@ private fun KnobCell(label: String, value: Float, color: Color, description: Str
+                     .clickable { onKill() }
+                     .padding(horizontal = 6.dp, vertical = 3.dp),
+             ) {
+-                Text(label, color = if (killed) Color.White else Metal.TextMuted, fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
++                Text(label, color = if (killed) Color.White else labelColor, fontSize = 12.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+             }
+         }
+     }
+@@ -1183,7 +1190,7 @@ private fun LiveVisual(vm: AppViewModel, la: Int, lb: Int, decks: List<DeckUi>,
+                 // equalizador (graves, médios, agudos e filtro), volume e medidor de cada deck
+                 Row(Modifier.fillMaxWidth().weight(1f).padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                     for (d in intArrayOf(la, lb)) {
+-                        ChannelStrip(vm, d, decks[d], vols[d], live, Modifier.width(90.dp).fillMaxHeight())
++                        ChannelStrip(vm, d, decks[d], vols[d], live, Modifier.width(90.dp).fillMaxHeight(), onSilver = true)
+                     }
+                 }
+                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+diff --git a/app/src/main/java/app/djfusion/ui/LibraryScreen.kt b/app/src/main/java/app/djfusion/ui/LibraryScreen.kt
+index e699b73..d75eea7 100644
+--- a/app/src/main/java/app/djfusion/ui/LibraryScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/LibraryScreen.kt
+@@ -101,7 +101,7 @@ fun LibraryScreen(vm: AppViewModel) {
+             MetalButton(
+                 description = "Importar músicas do aparelho",
+                 onPress = { vm.beginPicker(); picker.launch(arrayOf("*/*")) },
+-                modifier = Modifier.weight(1f).height(46.dp),
++                modifier = Modifier.weight(1f).height(40.dp),
+             ) {
+                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                     Text("IMPORTAR", color = Metal.OnMetal, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+@@ -113,7 +113,7 @@ fun LibraryScreen(vm: AppViewModel) {
+                 description = "Importar uma pasta inteira de músicas",
+                 onPress = { vm.beginPicker(); folderPicker.launch(null) },
+                 led = Metal.Success, ledOn = folders.isNotEmpty(),
+-                modifier = Modifier.weight(1.1f).height(46.dp),
++                modifier = Modifier.weight(1.1f).height(40.dp),
+             ) {
+                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                     Text("IMPORTAR", color = Metal.OnMetal, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+@@ -125,7 +125,7 @@ fun LibraryScreen(vm: AppViewModel) {
+                 MetalButton(
+                     description = "Atualizar as pastas importadas: procurar músicas novas",
+                     onPress = { vm.rescanFolders() },
+-                    modifier = Modifier.weight(1f).height(46.dp),
++                    modifier = Modifier.weight(1f).height(40.dp),
+                 ) {
+                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                         Text("ATUALIZAR", color = Metal.OnMetal, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+@@ -138,7 +138,7 @@ fun LibraryScreen(vm: AppViewModel) {
+                 description = if (analysis != null) "Parar a análise da biblioteca" else "Analisar andamento e tom de todas as músicas da biblioteca",
+                 onPress = { vm.analyzeLibrary() },
+                 led = Metal.Success, ledOn = analysis != null,
+-                modifier = Modifier.weight(1f).height(46.dp),
++                modifier = Modifier.weight(1f).height(40.dp),
+             ) {
+                 Text(
+                     if (analysis != null) "PARAR · $analysis" else "ANALISAR",
+@@ -150,7 +150,7 @@ fun LibraryScreen(vm: AppViewModel) {
+                 description = "Harmonizar: montar a ordem do set por tom, andamento e energia",
+                 onPress = { vm.harmonize() },
+                 led = Metal.Success, ledOn = setOrder.isNotEmpty(),
+-                modifier = Modifier.weight(1f).height(46.dp),
++                modifier = Modifier.weight(1f).height(40.dp),
+             ) {
+                 Text("HARMONIZAR", color = Metal.OnMetal, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+             }
+@@ -160,7 +160,8 @@ fun LibraryScreen(vm: AppViewModel) {
+             onValueChange = vm::setSearch,
+             singleLine = true,
+             placeholder = { Text("Buscar por música ou artista", maxLines = 1) },
+-            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
++            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(top = 2.dp),
++            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
+         )
+         Row(
+             Modifier.fillMaxWidth().padding(vertical = 2.dp).horizontalScroll(rememberScrollState()),
+@@ -260,10 +261,8 @@ fun LibraryScreen(vm: AppViewModel) {
+                         Column(Modifier.weight(1f)) {
+                             val played = row.id in vm.playedIds.collectAsStateWithLifecycle().value
+                             Text((if (played) "✓ " else "") + row.title, color = if (played) Metal.TextMuted else Metal.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+-                            Text(
+-                                (setPos[row.id]?.let { "#$it · " } ?: "") + (if (row.artist.isEmpty()) "Artista desconhecido" else row.artist) + if (row.genre.isNotEmpty()) " · ${row.genre}" else "",
+-                                color = Metal.TextMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+-                            )
++                            val sub = listOfNotNull(setPos[row.id]?.let { "#$it" }, row.artist.ifEmpty { null }, row.genre.ifEmpty { null }).joinToString(" · ")
++                            if (sub.isNotEmpty()) Text(sub, color = Metal.TextMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                         }
+                         Box(
+                             Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
