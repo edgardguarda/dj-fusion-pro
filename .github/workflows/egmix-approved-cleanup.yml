@@ -1,0 +1,42 @@
+name: EG MIX - limpeza autorizada de APKs temporarios redundantes
+on:
+  push:
+    branches: [eg-mix-11-5-8-unified-live]
+    paths: ['.github/workflows/egmix-approved-cleanup.yml']
+permissions:
+  actions: write
+  contents: read
+jobs:
+  cleanup:
+    if: github.repository == 'edgardguarda/dj-fusion-pro' && github.ref == 'refs/heads/eg-mix-11-5-8-unified-live'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Delete only approved superseded debug artifacts
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess
+          repo=os.environ['GITHUB_REPOSITORY']
+          targets=[[15112901581,"EG-MIX-11.5.6-neural-debug-apk",45810521262,15113360625,45810743438],[15077664449,"EG-MIX-11.5.3-neural-debug-apk",45735559618,15079206504,45735854829],[15077783507,"EG-MIX-11.5.3-neural-debug-apk",45734868740,15079206504,45735854829],[15074367483,"EG-MIX-11.5.2-neural-debug-apk",45725651960,15075170766,45726589396],[15073525520,"EG-MIX-11.5.1-neural-debug-apk",45722760054,15073102634,45722929503]]
+          def get(path):
+              return json.loads(subprocess.check_output(['gh','api',f'repos/{repo}/{path}']))
+          for aid,name,run,keep,k_run in targets:
+              a=get(f'actions/artifacts/{aid}')
+              b=get(f'actions/artifacts/{keep}')
+              assert a['name']==name and a['workflow_run']['id']==run and not a['expired']
+              assert b['name']==name and b['workflow_run']['id']==k_run and not b['expired']
+              assert get(f'actions/runs/{k_run}')['conclusion']=='success'
+          total=0
+          for aid,name,run,keep,k_run in targets:
+              a=get(f'actions/artifacts/{aid}')
+              subprocess.run(['gh','api','-X','DELETE',f'repos/{repo}/actions/artifacts/{aid}'],check=True)
+              result=subprocess.run(['gh','api',f'repos/{repo}/actions/artifacts/{aid}'],capture_output=True,text=True)
+              assert result.returncode!=0 and '404' in result.stderr
+              assert not get(f'actions/artifacts/{keep}')['expired']
+              total+=a['size_in_bytes']
+              print('REMOVED',aid,name,a['size_in_bytes'],'PRESERVED',keep,flush=True)
+          print('TOTAL_REMOVED_BYTES',total)
+          PY
