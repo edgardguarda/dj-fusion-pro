@@ -20,7 +20,7 @@ jobs:
           python3 - <<'PY'
           import json, os, subprocess
           repo=os.environ['GITHUB_REPOSITORY']
-          targets=[[15112901581,"EG-MIX-11.5.6-neural-debug-apk",45810521262,15113360625,45810743438],[15077664449,"EG-MIX-11.5.3-neural-debug-apk",45735559618,15079206504,45735854829],[15077783507,"EG-MIX-11.5.3-neural-debug-apk",45734868740,15079206504,45735854829],[15074367483,"EG-MIX-11.5.2-neural-debug-apk",45725651960,15075170766,45726589396],[15073525520,"EG-MIX-11.5.1-neural-debug-apk",45722760054,15073102634,45722929503]]
+          targets=[[15077664449,"EG-MIX-11.5.3-neural-debug-apk",45735559618,15079206504,45735854829],[15077783507,"EG-MIX-11.5.3-neural-debug-apk",45734868740,15079206504,45735854829],[15074367483,"EG-MIX-11.5.2-neural-debug-apk",45725651960,15075170766,45726589396],[15073525520,"EG-MIX-11.5.1-neural-debug-apk",45722760054,15073102634,45722929503]]
           def get(path):
               return json.loads(subprocess.check_output(['gh','api',f'repos/{repo}/{path}']))
           for aid,name,run,keep,k_run in targets:
@@ -33,8 +33,8 @@ jobs:
           for aid,name,run,keep,k_run in targets:
               a=get(f'actions/artifacts/{aid}')
               subprocess.run(['gh','api','-X','DELETE',f'repos/{repo}/actions/artifacts/{aid}'],check=True)
-              result=subprocess.run(['gh','api',f'repos/{repo}/actions/artifacts/{aid}'],capture_output=True,text=True)
-              assert result.returncode!=0 and '404' in result.stderr
+              listed=get(f'actions/runs/{run}/artifacts?per_page=100')['artifacts']
+              assert all(x['id']!=aid for x in listed), f'Artifact {aid} still listed'
               assert not get(f'actions/artifacts/{keep}')['expired']
               total+=a['size_in_bytes']
               print('REMOVED',aid,name,a['size_in_bytes'],'PRESERVED',keep,flush=True)
