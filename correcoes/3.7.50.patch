@@ -1,0 +1,293 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index b5e41ba..1ebaaab 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -12,8 +12,8 @@ android {
+         applicationId = "app.djfusion.pro"   // provisório, muda no /replica-brand
+         minSdk = 27                           // AAudio disponível
+         targetSdk = 36                        // exigido pela Play Store desde 31/08/2026 (Android 16)
+-        versionCode = 93
+-        versionName = "3.7.49"
++        versionCode = 94
++        versionName = "3.7.50"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+ 
+         ndk {
+diff --git a/app/src/androidTest/java/app/djfusion/E2ETest.kt b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+index a1d9bda..dd0bbb9 100644
+--- a/app/src/androidTest/java/app/djfusion/E2ETest.kt
++++ b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+@@ -401,7 +401,7 @@ class E2ETest {
+             waitFor(3000, "mesa completa") { !vm.liveVisual.value }
+         }
+         rule.waitForIdle()
+-        for (d in listOf("Tocar deck A", "Tocar deck B", "AUTO DJ: o programa", "BIBLIOTECA", "CONTROLADORA", "AMOSTRAS", "DJ LIVE", "EFEITOS", "AJUSTES")) center(d, d == "AUTO DJ: o programa")
++        for (d in listOf("Tocar deck A", "Tocar deck B", "AUTO DJ: o programa", "BIBLIOTECA", "CONTROLADORA", "SAMPLERS", "DJ LIVE", "EFEITOS", "AJUSTES")) center(d, d == "AUTO DJ: o programa")
+         center("Gravar o set", true)
+         alias("Parar a gravação do set e salvar", "Gravar o set", true)
+         for (d in listOf("Cue do deck A", "Sync do deck B", "Key-lock do deck A", "Fone do deck A", "Prato do deck A", "Abrir pads",
+@@ -1025,7 +1025,7 @@ class E2ETest {
+         }
+         shot("stems_tom_ganho")
+ 
+-        tab("AMOSTRAS")
++        tab("SAMPLERS")
+         step("AMOSTRAR gera pads") {
+             tap("Escolher sozinho os melhores trechos", substring = true)
+             waitFor(20_000, "amostras") { vm.pads.value.any { it.ready && it.loop } }
+@@ -2074,7 +2074,7 @@ class E2ETest {
+                 if (pt == null) log("info  VARREDURA: não achou '$desc'") else device.click(pt.x, pt.y)
+                 SystemClock.sleep(700)
+             }
+-            for (t in listOf("DJ LIVE", "BIBLIOTECA", "AUTO DJ", "EFEITOS", "AMOSTRAS")) { go(t); sweep(t) }
++            for (t in listOf("DJ LIVE", "BIBLIOTECA", "AUTO DJ", "EFEITOS", "SAMPLERS")) { go(t); sweep(t) }
+             go("CONTROLADORA")
+             for (sec in listOf("CONECTADA", "PRATOS", "OPÇÕES")) { go("Seção da controladora $sec", true); sweep("CONTROLADORA $sec") }
+             go("AJUSTES")
+diff --git a/app/src/main/java/app/djfusion/ui/AppRoot.kt b/app/src/main/java/app/djfusion/ui/AppRoot.kt
+index 27d6a2c..c8be93f 100644
+--- a/app/src/main/java/app/djfusion/ui/AppRoot.kt
++++ b/app/src/main/java/app/djfusion/ui/AppRoot.kt
+@@ -117,7 +117,7 @@ private fun AppRootInner(vm: AppViewModel) {
+                 Tab("BIBLIOTECA", selected = screen == Screen.LIBRARY, enabled = true) { screen = Screen.LIBRARY }
+                 Tab("AUTO DJ", selected = screen == Screen.AUTODJ, enabled = true) { screen = Screen.AUTODJ }
+                 Tab("EFEITOS", selected = screen == Screen.FX, enabled = true) { screen = Screen.FX }
+-                Tab("AMOSTRAS", selected = screen == Screen.SAMPLER, enabled = true) { screen = Screen.SAMPLER }
++                Tab("SAMPLERS", selected = screen == Screen.SAMPLER, enabled = true) { screen = Screen.SAMPLER }
+                 Tab("CONTROLADORA", selected = screen == Screen.MIDI, enabled = true) { screen = Screen.MIDI }
+                 Tab("AJUSTES", selected = screen == Screen.SETTINGS, enabled = true) { screen = Screen.SETTINGS }
+                 Box(Modifier.weight(1f))
+diff --git a/app/src/main/java/app/djfusion/ui/AppViewModel.kt b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+index 2ef04c8..a6bab4d 100644
+--- a/app/src/main/java/app/djfusion/ui/AppViewModel.kt
++++ b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+@@ -1019,14 +1019,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+     }
+ 
+     /** CAPTURA: o compasso que está tocando agora (4 batidas, a partir da batida) vira um loop num pad do deck. */
+-    fun captureLoop(deck: Int) {
++    fun captureLoop(deck: Int, slotOverride: Int? = null) {
+         val d = _decks.value[deck]
+         if (!d.loaded || d.loading) { say("Carregue uma música no deck ${deckName(deck)} primeiro."); return }
+         val beat = if (d.hasBpm) 60.0 * NativeEngine.SAMPLE_RATE / d.bpm else NativeEngine.SAMPLE_RATE * 0.5
+         val pos = posOf(deck)
+         val start = if (d.hasBpm) (d.firstBeatFrame + Math.floor((pos - d.firstBeatFrame) / beat) * beat).toLong() else pos
+         val base = (deck % 2) * 4
+-        val slot = (base until base + 4).firstOrNull { !_pads.value[it].ready } ?: (base + 3)
++        val slot = slotOverride?.coerceIn(0, PAD_COUNT - 1) ?: ((base until base + 4).firstOrNull { !_pads.value[it].ready } ?: (base + 3))
+         viewModelScope.launch(Dispatchers.Default) {
+             if (!NativeEngine.nativeCaptureSample(deck, slot, start.coerceAtLeast(0L), (4 * beat).toLong())) { say("Não consegui capturar."); return@launch }
+             sentSpeed[slot] = 1f; NativeEngine.nativeSetSampleSpeed(slot, 1f)
+@@ -1204,28 +1204,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+         _seq.update { it.copy(playing = true, step = -1) }
+         seqJob = viewModelScope.launch(Dispatchers.Default) {
+             val sr = NativeEngine.SAMPLE_RATE.toDouble()
+-            var next = System.nanoTime() + 120_000_000L
+-            var i = 0
++            var free = System.nanoTime() + 120_000_000L      // relógio próprio (usado só sem deck de referência)
++            var freeI = 0
++            val st4 = LongArray(4)
+             while (true) {
+                 val q = _seq.value
+-                val bpm = if (q.followDeck) (leadDeck()?.let { _decks.value[it].playedBpm.toFloat() }?.takeIf { it in 60f..200f } ?: q.bpm) else q.bpm
+-                val stepNs = (60.0 / bpm / 4.0 * 1e9).toLong()
++                val lead = if (q.followDeck) leadDeck() else null
++                val ld = lead?.let { _decks.value[it] }
++                var st: Int
++                var target: Long                                // instante (nanossegundos) do próximo passo
++                var stepNs: Long
++                if (lead != null && ld != null && ld.bpm > 0.0 && ld.rate > 0f) {
++                    // TRAVADO NO DECK: cada passo é calculado da posição real da música (pitch e fase iguais, mesmo se o DJ mexer no pitch)
++                    NativeEngine.nativeDeckState(lead, st4)
++                    val beatSrc = 60.0 * sr / ld.bpm
++                    val ph = (st4[1] - ld.firstBeatFrame) / beatSrc            // posição em batidas (fração = fase)
++                    var k = Math.ceil(ph * 4.0 - 1e-6)                          // próximo semi-colcheia
++                    var ahead = (k / 4.0 - ph) * beatSrc / ld.rate / sr * 1e9  // ns até ele
++                    if (ahead < 70_000_000.0) { k += 1.0; ahead += beatSrc / 4.0 / ld.rate / sr * 1e9 }
++                    target = System.nanoTime() + ahead.toLong()
++                    st = (((k.toLong() % 16) + 16) % 16).toInt()
++                    stepNs = (beatSrc / 4.0 / ld.rate / sr * 1e9).toLong()
++                    val shown = (ld.playedBpm * 10).toLong() / 10f
++                    if (kotlin.math.abs(_seq.value.bpm - shown) > 0.05f) _seq.update { it.copy(bpm = shown.toFloat().coerceIn(60f, 200f)) }
++                    free = target + stepNs; freeI = st + 1
++                } else {
++                    val bpm = q.bpm
++                    stepNs = (60.0 / bpm / 4.0 * 1e9).toLong()
++                    if (free < System.nanoTime() + 5_000_000L) free = System.nanoTime() + 20_000_000L
++                    target = free
++                    st = freeI % 16
++                    free += stepNs; freeI++
++                }
+                 // acorda 60 ms antes do passo e agenda o disparo no quadro certo dentro do motor de áudio
+-                val wake = next - 60_000_000L
+-                val wait = (wake - System.nanoTime()) / 1_000_000L
++                val wait = (target - 60_000_000L - System.nanoTime()) / 1_000_000L
+                 if (wait > 0) kotlinx.coroutines.delay(wait)
+-                val frames = (((next - System.nanoTime()) / 1e9) * sr).toLong().coerceAtLeast(0L)
+-                val st = i % 16
++                val frames = (((target - System.nanoTime()) / 1e9) * sr).toLong().coerceAtLeast(0L)
+                 val now = _seq.value
+                 for (r in 0 until SEQ_ROWS) {
+                     if ((now.steps[r] shr st) and 1 == 1) NativeEngine.nativeTriggerSampleAt(now.slots[r], false, frames)
+                 }
+-                val shown = st
+-                val delayUi = ((next - System.nanoTime()) / 1_000_000L).coerceAtLeast(0L)
++                val delayUi = ((target - System.nanoTime()) / 1_000_000L).coerceAtLeast(0L)
+                 kotlinx.coroutines.delay(delayUi)
+-                _seq.update { it.copy(step = shown) }
+-                next += stepNs
+-                i++
++                _seq.update { it.copy(step = st) }
+             }
+         }
+     }
+@@ -1328,9 +1349,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+         }
+     }
+ 
++    /** Faixas que já estão sendo analisadas (ou já foram tentadas nesta sessão): evita análise dupla e laço infinito. */
++    private val analyzing = java.util.Collections.synchronizedSet(HashSet<Long>())
++    private var autoAnalyzeJob: Job? = null
++
++    /** Análise automática em segundo plano: músicas novas entram na biblioteca e são analisadas sem o DJ pedir. */
++    fun startBackgroundAnalysis() {
++        if (autoAnalyzeJob?.isActive == true) return
++        autoAnalyzeJob = viewModelScope.launch {
++            try {
++                val n = analyzeMissing { done, total -> _analysisProgress.value = "Analisando $done de $total" }
++                if (n > 0) say("Análise automática concluída: $n música(s).")
++            } finally {
++                _analysisProgress.value = null
++            }
++        }
++    }
++
+     /** Analisa (andamento e tom) as faixas que faltam. Devolve quantas analisou. Usado também pelo AUTO DJ. */
+     suspend fun analyzeMissing(progress: (Int, Int) -> Unit): Int {
+-        val todo = withContext(Dispatchers.IO) { db.unanalyzed() }
++        val todo = withContext(Dispatchers.IO) { db.unanalyzed() }.filter { analyzing.add(it.id) }
+         val done = java.util.concurrent.atomic.AtomicInteger(0)
+         // duas músicas ao mesmo tempo: a leitura do arquivo e a análise usam núcleos diferentes
+         val gate = kotlinx.coroutines.sync.Semaphore(2)
+@@ -1340,8 +1378,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+                     gate.acquire()
+                     try {
+                         progress(done.get() + 1, todo.size)
+-                        analyzeOne(row)
+-                        done.incrementAndGet()
++                        try {
++                            analyzeOne(row)
++                            done.incrementAndGet()
++                        } catch (e: kotlinx.coroutines.CancellationException) {
++                            analyzing.remove(row.id); throw e
++                        } catch (_: Throwable) { /* fica marcada como tentada: não trava as outras nem repete em laço */ }
+                         libraryVersion.update { it + 1 }
+                     } finally {
+                         gate.release()
+@@ -1443,6 +1485,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+         }
+         // rede de batidas (Beat This!) desligada: no teste o app foi morto por falta de memória com o ONNX rodando junto dos stems.
+         // O detector clássico novo já foi conferido em 14 faixas reais. Para religar: chamar ensureBeatModel() aqui, depois de medir a memória.
++        // 3.7.50: músicas que entram na biblioteca são analisadas sozinhas (espera 1,5 s para juntar importações em lote)
++        viewModelScope.launch {
++            libraryVersion.collect {
++                delay(1500)
++                if (autoAnalyzeJob?.isActive != true && withContext(Dispatchers.IO) { db.unanalyzed() }.any { it.id !in analyzing }) startBackgroundAnalysis()
++            }
++        }
+         NeuralStems.deckPlaying = { _decks.value.any { it.playing } }
+         midi.start()
+         router.start()
+diff --git a/app/src/main/java/app/djfusion/ui/AutoDj.kt b/app/src/main/java/app/djfusion/ui/AutoDj.kt
+index c0d9598..3020fe3 100644
+--- a/app/src/main/java/app/djfusion/ui/AutoDj.kt
++++ b/app/src/main/java/app/djfusion/ui/AutoDj.kt
+@@ -366,14 +366,15 @@ class AutoDj(
+             return
+         }
+         if (library.any { !it.analyzed }) {
+-            // analisa sozinho o que falta (andamento e tom), sem pedir nada ao DJ
+-            if (library.count { it.bpm > 0 } >= 6) {
+-                // já há músicas analisadas de sobra: começa a mixar e termina a análise em segundo plano
+-                scope.launch { vm.analyzeMissing { _, _ -> } }
+-            } else {
+-                vm.analyzeMissing { done, total -> status("Analisando a biblioteca: $done de $total") }
++            // analisa sozinho o que falta, em segundo plano, e começa assim que houver 2 músicas prontas (sem esperar o resto)
++            vm.startBackgroundAnalysis()
++            var waited = 0
++            while (library.count { it.bpm > 0 } < 2 && library.any { !it.analyzed } && waited < 240) {
++                status("Analisando as primeiras músicas… (${library.count { it.bpm > 0 }} de 2)")
++                kotlinx.coroutines.delay(500)
++                waited++
++                library = libraryNow()
+             }
+-            library = libraryNow()
+         }
+         if (library.count { it.bpm > 0 } < 2) {
+             vm.say("O AUTO DJ não achou andamento em pelo menos 2 músicas.")
+diff --git a/app/src/main/java/app/djfusion/ui/SamplerScreen.kt b/app/src/main/java/app/djfusion/ui/SamplerScreen.kt
+index 69c2428..232c301 100644
+--- a/app/src/main/java/app/djfusion/ui/SamplerScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/SamplerScreen.kt
+@@ -41,6 +41,7 @@ fun SamplerScreen(vm: AppViewModel) {
+     val pads by vm.pads.collectAsStateWithLifecycle()
+     val vol by vm.samplerVol.collectAsStateWithLifecycle()
+     var tab by remember { mutableIntStateOf(0) }
++    var capDeck by remember { mutableIntStateOf(-1) }     // -1 desligado; 0 = copiar do deck A, 1 = do deck B
+     Row(Modifier.fillMaxSize().background(Metal.Bg).padding(14.dp)) {
+         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+             Row(Modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+@@ -61,8 +62,8 @@ fun SamplerScreen(vm: AppViewModel) {
+                         val p = pads[i]
+                         MetalButton(
+                             description = if (p.ready) "Pad ${i + 1}: ${p.label}" else "Pad ${i + 1} vazio",
+-                            onPress = { vm.padPress(i) },
+-                            enabled = p.ready,
++                            onPress = { if (capDeck >= 0) vm.captureLoop(capDeck, i) else vm.padPress(i) },
++                            enabled = p.ready || capDeck >= 0,
+                             led = Metal.DeckA, ledOn = p.playing,
+                             modifier = Modifier.weight(1f).fillMaxHeight(),
+                         ) {
+@@ -85,7 +86,19 @@ fun SamplerScreen(vm: AppViewModel) {
+                 onPress = { vm.buildSamples() },
+                 led = Metal.Success, ledOn = pads.any { it.ready },
+                 modifier = Modifier.weight(1f).fillMaxWidth(),
+-            ) { Text("GERAR\nAMOSTRAS", color = Metal.OnMetal, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center)) }
++            ) { Text("GERAR\nSAMPLERS", color = Metal.OnMetal, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center)) }
++            Spacer(Modifier.height(8.dp))
++            Row(Modifier.fillMaxWidth().weight(0.6f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
++                for (dk in 0..1) {
++                    MetalButton(
++                        description = "Copiar um compasso da música do deck ${if (dk == 0) "A" else "B"} para o pad que você tocar (ligado: ${capDeck == dk})",
++                        onPress = { capDeck = if (capDeck == dk) -1 else dk },
++                        led = if (dk == 0) Metal.DeckA else Metal.DeckB, ledOn = capDeck == dk,
++                        modifier = Modifier.weight(1f).fillMaxHeight(),
++                    ) { Text("COPIAR\n${if (dk == 0) "A" else "B"}", color = Metal.OnMetal, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center)) }
++                }
++            }
++            if (capDeck >= 0) Text("Toque num pad: o compasso que toca no deck ${if (capDeck == 0) "A" else "B"} é copiado para ele.", color = Metal.TextMuted, fontSize = 10.sp, textAlign = TextAlign.Center)
+             Spacer(Modifier.height(8.dp))
+             MetalButton(
+                 description = "Sons prontos de DJ nos pads",
+diff --git a/app/src/main/java/app/djfusion/ui/SettingsScreen.kt b/app/src/main/java/app/djfusion/ui/SettingsScreen.kt
+index bbb06d8..baf42b1 100644
+--- a/app/src/main/java/app/djfusion/ui/SettingsScreen.kt
++++ b/app/src/main/java/app/djfusion/ui/SettingsScreen.kt
+@@ -533,7 +533,7 @@ private val HELP_TOPICS = listOf(
+         "Em LOOP MANUAL use IN para marcar o começo e OUT para o fim. SALVAR guarda o loop (até 3 por música) e ▶1, ▶2, ▶3 chamam de volta, mesmo outro dia.",
+     "TUTORIAL: SYNC E MESTRE" to "SYNC iguala o andamento do deck ao outro. Toque em MESTRE num deck para que ele seja a referência: os outros decks passam a seguir o andamento dele. " +
+         "Toque em MESTRE de novo para soltar.",
+-    "TUTORIAL: AMOSTRAS E BATERIA" to "Em AMOSTRAS há 16 pads: 1–8 para trechos das suas músicas (GERAR AMOSTRAS) e 9–16 com bateria pronta (bumbo, caixa, hi-hat, tom, rim, chocalho, prato). " +
++    "TUTORIAL: SAMPLERS E BATERIA" to "Em SAMPLERS há 16 pads: 1–8 para trechos das suas músicas (GERAR SAMPLERS) e 9–16 com bateria pronta (bumbo, caixa, hi-hat, tom, rim, chocalho, prato). " +
+         "Toque em SEQUENCIADOR DE BATERIA: cada quadrado é 1/16 de compasso. Toque nos quadrados para ligar os sons, ▶ TOCAR para ouvir; ele segue o andamento do deck que está tocando. RITMO BASE monta um ritmo pronto. Toque no nome da linha para trocar o som.",
+     "TUTORIAL: BIBLIOTECA POR ARTISTA, GÊNERO E PASTA" to "Em BIBLIOTECA, toque em Artistas, Gêneros ou Álbuns/pastas: aparece a lista de grupos com capa e número de faixas. Toque num grupo para ver as músicas dele; " +
+         "‹ voltar traz a lista de novo. As capas vêm de dentro do arquivo da música.",
+@@ -543,7 +543,7 @@ private val HELP_TOPICS = listOf(
+         "ensine REVERSO (segurar) em MAPEAR para ouvi-la ao contrário só enquanto o botão está apertado: ao soltar, ela volta no ponto onde estaria.",
+     "EFEITOS" to "Eco, reverb, filtro, flanger e outros por deck, até 3 juntos, com o pad XY para tocar o efeito com o dedo. O botão do efeito liga e desliga; o botão giratório ajusta a quantidade. " +
+         "Use o filtro e o eco para entrar e sair de músicas com suavidade.",
+-    "AMOSTRAS" to "Sons curtos (sirenes, vozes, batidas) para disparar por cima da mixagem. Os sons prontos já estão nos pads; " +
++    "SAMPLERS" to "Sons curtos (sirenes, vozes, batidas) para disparar por cima da mixagem. Os sons prontos já estão nos pads; " +
+         "você pode importar os seus.",
+     "CONTROLADORA" to "Funciona com a maioria das controladoras DJ, inclusive antigas. Ligue por USB; o app reconhece o modelo e aplica o mapa certo. " +
+         "No MONITOR você vê o que a controladora está enviando, e o TESTE RÁPIDO conta quantos controles diferentes ela já mexeu. " +
