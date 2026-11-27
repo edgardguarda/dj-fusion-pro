@@ -1,0 +1,29 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 42c4cf3..b5e41ba 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -12,8 +12,8 @@ android {
+         applicationId = "app.djfusion.pro"   // provisório, muda no /replica-brand
+         minSdk = 27                           // AAudio disponível
+         targetSdk = 36                        // exigido pela Play Store desde 31/08/2026 (Android 16)
+-        versionCode = 92
+-        versionName = "3.7.49"
++        versionCode = 93
++        versionName = "3.7.49"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+ 
+         ndk {
+diff --git a/app/src/main/java/app/djfusion/ui/AppViewModel.kt b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+index c7ba656..2ef04c8 100644
+--- a/app/src/main/java/app/djfusion/ui/AppViewModel.kt
++++ b/app/src/main/java/app/djfusion/ui/AppViewModel.kt
+@@ -1441,7 +1441,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+                 try { db.resetAutoBeatAnalysis(); pr.edit().putInt("algoritmo", 2).apply() } catch (_: Throwable) {}
+             }
+         }
+-        ensureBeatModel()
++        // rede de batidas (Beat This!) desligada: no teste o app foi morto por falta de memória com o ONNX rodando junto dos stems.
++        // O detector clássico novo já foi conferido em 14 faixas reais. Para religar: chamar ensureBeatModel() aqui, depois de medir a memória.
+         NeuralStems.deckPlaying = { _decks.value.any { it.playing } }
+         midi.start()
+         router.start()
