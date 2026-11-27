@@ -1,0 +1,41 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 973d746..42c4cf3 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -12,8 +12,8 @@ android {
+         applicationId = "app.djfusion.pro"   // provisório, muda no /replica-brand
+         minSdk = 27                           // AAudio disponível
+         targetSdk = 36                        // exigido pela Play Store desde 31/08/2026 (Android 16)
+-        versionCode = 91
+-        versionName = "3.7.47"
++        versionCode = 92
++        versionName = "3.7.48"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+ 
+         ndk {
+diff --git a/app/src/androidTest/java/app/djfusion/E2ETest.kt b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+index e576098..a1d9bda 100644
+--- a/app/src/androidTest/java/app/djfusion/E2ETest.kt
++++ b/app/src/androidTest/java/app/djfusion/E2ETest.kt
+@@ -1171,7 +1171,7 @@ class E2ETest {
+             val f = app.djfusion.audio.BeatThis.features(tone)
+             check(f.size == (1 + tone.size / 441) * 128, "tamanho do espectro ${f.size}")
+             check(f.all { !it.isNaN() && it >= 0f }, "espectro com valores inválidos")
+-            check(f.max() > 1f, "espectro sem energia")
++            check(f.maxOrNull()!! > 1f, "espectro sem energia")
+         }
+         step("3 EFEITOS juntos (encaixes FX1, FX2 e FX3)") {
+             tap("Efeito ECO do deck A (tela", substring = true)
+diff --git a/app/src/main/cpp/native_bridge.cpp b/app/src/main/cpp/native_bridge.cpp
+index fe8b710..ec59258 100644
+--- a/app/src/main/cpp/native_bridge.cpp
++++ b/app/src/main/cpp/native_bridge.cpp
+@@ -168,7 +168,7 @@ JNI(jlong, nativeTrackFrames)(JNIEnv*, jclass, jlong track) {
+ JNI(jfloatArray, nativeTrackMono22k)(JNIEnv* env, jclass, jlong track) {
+   auto* t = reinterpret_cast<TrackPtr*>(track);
+   if (!t || (*t)->frames <= 0) return nullptr;
+-  const Track& tr = **t;
++  const djf::Track& tr = **t;
+   const double ratio = static_cast<double>(tr.sampleRate) / 22050.0;
+   const jsize n = static_cast<jsize>(static_cast<double>(tr.frames) / ratio);
+   if (n <= 0) return nullptr;
